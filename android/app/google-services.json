@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "43937279527",
+    "project_id": "toda-56a3d",
+    "storage_bucket": "toda-56a3d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:43937279527:android:23dd31e0d59b684b242802",
+        "android_client_info": {
+          "package_name": "com.todai.todai"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "43937279527-tbsnlgcl60g01fg0do0l0s7dg31v4jes.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD0R2B7CTXjyyTHhcuOSTrKt5FWq3mjuVs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "43937279527-tbsnlgcl60g01fg0do0l0s7dg31v4jes.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

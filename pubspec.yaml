@@ -1,0 +1,47 @@
+name: todai
+description: "Todai - AI-powered Todo Management App with Zen minimalist design"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  
+  # Firebase packages (LOCKED versions)
+  firebase_core: 3.6.0
+  cloud_firestore: 5.4.3
+  firebase_auth: 5.3.1
+  
+  # Google Sign-In
+  google_sign_in: 6.2.2
+  
+  # State management
+  provider: 6.1.5+1
+  
+  # HTTP client for API requests
+  http: 1.5.0
+  
+  # UUID generation
+  uuid: 4.5.1
+  
+  # Date formatting
+  intl: 0.20.2
+  
+  # Local storage
+  shared_preferences: 2.5.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/icons/
