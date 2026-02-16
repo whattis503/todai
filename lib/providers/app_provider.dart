@@ -632,14 +632,26 @@ class AppProvider extends ChangeNotifier {
             if (typeStr == 'weeklyOnce') type = RepetitionType.weeklyOnce;
             if (typeStr == 'weeklyN') type = RepetitionType.weeklyN;
             
+            // Parse endDate if provided
+            DateTime? routineEndDate;
+            final endDateStr = call.arguments['endDate'] as String?;
+            if (endDateStr != null) {
+              routineEndDate = DateTime.parse(endDateStr);
+            }
+            
             await createRoutine(
               text: call.arguments['text'] ?? '',
               estimatedTime: call.arguments['estimatedTime'] as int?,
               repetitionType: type,
               repetitionCount: call.arguments['repetitionCount'] as int? ?? 1,
               weekdays: (call.arguments['weekdays'] as List<dynamic>?)?.cast<int>() ?? [],
+              endDate: routineEndDate,
             );
-            results.add('✅ 루틴 생성: "${call.arguments['text']}"');
+            if (routineEndDate != null) {
+              results.add('✅ 루틴 생성: "${call.arguments['text']}" (종료: ${routineEndDate.month}/${routineEndDate.day})');
+            } else {
+              results.add('✅ 루틴 생성: "${call.arguments['text']}"');
+            }
             break;
             
           case 'updateRoutine':
@@ -653,14 +665,26 @@ class AppProvider extends ChangeNotifier {
                 if (typeStr == 'weeklyOnce') type = RepetitionType.weeklyOnce;
                 if (typeStr == 'weeklyN') type = RepetitionType.weeklyN;
                 
+                // Parse endDate if provided
+                DateTime? endDate;
+                final endDateStr = call.arguments['endDate'] as String?;
+                if (endDateStr != null) {
+                  endDate = DateTime.parse(endDateStr);
+                }
+                
                 final updated = routine.copyWith(
                   text: call.arguments['newText'] as String? ?? routine.text,
                   estimatedTime: call.arguments['estimatedTime'] as int? ?? routine.estimatedTime,
                   repetitionType: type ?? routine.repetitionType,
                   weekdays: (call.arguments['weekdays'] as List<dynamic>?)?.cast<int>() ?? routine.weekdays,
+                  endDate: endDate,
                 );
                 await updateRoutine(updated);
-                results.add('✅ 루틴 수정: "$searchText"');
+                if (endDate != null) {
+                  results.add('✅ 루틴 종료일 설정: "$searchText" → ${endDate.month}/${endDate.day}');
+                } else {
+                  results.add('✅ 루틴 수정: "$searchText"');
+                }
               } else {
                 results.add('❌ 루틴을 찾을 수 없음: "$searchText"');
               }

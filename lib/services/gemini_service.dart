@@ -143,6 +143,7 @@ You can call multiple functions if needed.
    - repetitionType (required): "daily", "weeklyOnce", or "weeklyN"
    - repetitionCount (optional): Times per week (for weeklyN)
    - weekdays (optional): Array of 1-7 (Mon=1, Sun=7)
+   - endDate (optional): End date in YYYY-MM-DD format (routine will stop after this date)
 
 6. updateRoutine: Update existing routine
    - searchText (required): Text to find the routine
@@ -150,6 +151,7 @@ You can call multiple functions if needed.
    - estimatedTime (optional): New estimated time
    - repetitionType (optional): New type
    - weekdays (optional): New weekdays
+   - endDate (optional): End date in YYYY-MM-DD format (routine will stop after this date)
 
 7. deleteRoutine: Delete a routine
    - searchText (required): Text to find and delete
@@ -201,6 +203,12 @@ Response: [{"name": "createRoutine", "arguments": {"text": "운동", "repetition
 
 User: "월수금 영어 공부 루틴"
 Response: [{"name": "createRoutine", "arguments": {"text": "영어 공부", "repetitionType": "weeklyOnce", "weekdays": [1, 3, 5]}}]
+
+User: "운동 루틴 3월 31일까지로 설정해줘"
+Response: [{"name": "updateRoutine", "arguments": {"searchText": "운동", "endDate": "2025-03-31"}}]
+
+User: "영어 공부 루틴 다음달 말까지만"
+Response: [{"name": "updateRoutine", "arguments": {"searchText": "영어 공부", "endDate": "2025-03-31"}}]
 
 User: "회의 일정 3시로 변경해줘"
 Response: [{"name": "updateCalendarEvent", "arguments": {"searchText": "회의", "startTime": "15:00", "endTime": "16:00"}}]
@@ -322,6 +330,10 @@ Respond ONLY with a JSON array. No other text.
         if (type == 'weeklyN') typeKr = '주 ${args['repetitionCount'] ?? 1}회';
         return '루틴 생성: "$text" ($typeKr)';
       case 'updateRoutine':
+        final endDate = args['endDate'];
+        if (endDate != null) {
+          return '루틴 종료일 설정: "${args['searchText']}" → $endDate';
+        }
         return '루틴 수정: "${args['searchText']}"';
       case 'deleteRoutine':
         return '루틴 삭제: "${args['searchText']}"';

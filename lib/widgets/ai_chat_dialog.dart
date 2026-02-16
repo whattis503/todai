@@ -19,6 +19,7 @@ class _AIChatDialogState extends State<AIChatDialog> {
   List<FunctionCall>? _pendingCalls;
   bool _isLoading = false;
   bool _showApiKeyInput = false;
+  bool _shouldAutoFocus = false;
 
   @override
   void initState() {
@@ -29,11 +30,7 @@ class _AIChatDialogState extends State<AIChatDialog> {
       _showApiKeyInput = true;
     } else {
       // API 키가 있으면 자동으로 입력창에 포커스
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !_showApiKeyInput) {
-          _messageFocusNode.requestFocus();
-        }
-      });
+      _shouldAutoFocus = true;
     }
   }
 
@@ -206,6 +203,7 @@ class _AIChatDialogState extends State<AIChatDialog> {
                 '추가: "매일 아침 운동 루틴 만들어줘"',
                 '추가: "월수금 영어 공부 루틴 만들어줘"',
                 '수정: "운동 루틴을 저녁 운동으로 바꿔줘"',
+                '종료일: "운동 루틴 3월 31일까지로 설정해줘"',
                 '삭제: "운동 루틴 삭제해줘"',
               ],
             ),
@@ -463,6 +461,7 @@ class _AIChatDialogState extends State<AIChatDialog> {
             child: TextField(
               controller: _messageController,
               focusNode: _messageFocusNode,
+              autofocus: _shouldAutoFocus && !_showApiKeyInput,
               enabled: provider.hasGeminiApiKey && !_showApiKeyInput,
               decoration: InputDecoration(
                 hintText: provider.hasGeminiApiKey 
