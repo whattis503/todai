@@ -8,8 +8,6 @@ import '../services/calendar_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/fullscreen_timer.dart';
 
-enum CalendarViewMode { month, week }
-
 class CombinedScreen extends StatefulWidget {
   const CombinedScreen({super.key});
 
@@ -18,10 +16,7 @@ class CombinedScreen extends StatefulWidget {
 }
 
 class _CombinedScreenState extends State<CombinedScreen> {
-  CalendarViewMode _viewMode = CalendarViewMode.month;
-  late PageController _monthPageController;
   late ScrollController _weekScrollController;
-  DateTime _focusedDate = DateTime.now();
   List<CalendarEvent> _googleEvents = [];
   
   // Todo input
@@ -34,15 +29,36 @@ class _CombinedScreenState extends State<CombinedScreen> {
   String? _editingTodoId;
   final TextEditingController _editController = TextEditingController();
   final FocusNode _editFocus = FocusNode();
+  
+  // Drag reordering
+  int? _dropTargetIndex;
+  bool _dropAsChild = false;  // true면 하위로 들어감
 
   @override
   void initState() {
     super.initState();
-    _monthPageController = PageController(initialPage: 500);
+    // Initial scroll will be set after layout
     _weekScrollController = ScrollController();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _tryLoadGoogleEvents();
+      _scrollToToday();
     });
+  }
+  
+  void _scrollToToday() {
+    if (!mounted) return;
+    final viewportWidth = MediaQuery.of(context).size.width;
+    final todayButtonWidth = 56.0; // 오늘 버튼 너비
+    final availableWidth = viewportWidth - todayButtonWidth - 24; // 좌우 패딩
+    final itemWidth = 52.0; // 46 width + 6 margin
+    final centerOffset = (availableWidth - itemWidth) / 2;
+    final scrollTarget = (365 * itemWidth) - centerOffset;
+    
+    if (_weekScrollController.hasClients) {
+      _weekScrollController.jumpTo(
+        scrollTarget.clamp(0.0, _weekScrollController.position.maxScrollExtent),
+      );
+    }
   }
 
   @override
@@ -51,7 +67,6 @@ class _CombinedScreenState extends State<CombinedScreen> {
     _newTodoFocus.dispose();
     _editController.dispose();
     _editFocus.dispose();
-    _monthPageController.dispose();
     _weekScrollController.dispose();
     super.dispose();
   }
@@ -59,24 +74,20 @@ class _CombinedScreenState extends State<CombinedScreen> {
   Future<void> _tryLoadGoogleEvents() async {
     if (!mounted) return;
     final provider = Provider.of<AppProvider>(context, listen: false);
-    if (!provider.authService.hasCalendarAccess) return;
     
-    DateTime start, end;
-    if (_viewMode == CalendarViewMode.month) {
-      start = DateTime(_focusedDate.year, _focusedDate.month, 1);
-      end = DateTime(_focusedDate.year, _focusedDate.month + 1, 0, 23, 59, 59);
-    } else {
-      final weekStart = _focusedDate.subtract(Duration(days: _focusedDate.weekday - 1));
-      start = DateTime(weekStart.year, weekStart.month, weekStart.day);
-      end = start.add(const Duration(days: 7));
-    }
+    // Load events for current month range (try even without explicit calendar access)
+    final now = DateTime.now();
+    final start = DateTime(now.year, now.month - 1, 1);
+    final end = DateTime(now.year, now.month + 2, 0, 23, 59, 59);
 
     try {
       await provider.loadCalendarEvents(start, end);
       if (mounted) {
         setState(() => _googleEvents = provider.calendarEvents);
       }
-    } catch (_) {}
+    } catch (e) {
+      // Silently fail - calendar is optional
+    }
   }
 
   @override
@@ -86,24 +97,49 @@ class _CombinedScreenState extends State<CombinedScreen> {
         final todos = provider.organizedTodos;
         final selectedDate = provider.selectedDate;
         final isToday = DateUtils.isSameDay(selectedDate, DateTime.now());
+        
+        // Get calendar events for selected date (use provider's events directly)
+        final allEvents = provider.calendarEvents.isNotEmpty ? provider.calendarEvents : _googleEvents;
+        final dayEvents = allEvents.where((e) => DateUtils.isSameDay(e.start, selectedDate)).toList();
 
         return Column(
           children: [
-            // Calendar section
-            _buildCalendarSection(provider),
+            // Week view only
+            _buildWeekView(provider),
             
             const Divider(height: 1, color: AppTheme.divider),
             
-            // Selected date header
+            // Selected date header with full date
             _buildDateHeader(selectedDate, isToday, provider),
             
-            // Todo list
+            // Todo list with calendar events
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.only(bottom: 100),
                 children: [
+                  // === CALENDAR EVENTS SECTION (일정이 있을 때만 표시, 없으면 완전히 숨김) ===
+                  if (dayEvents.isNotEmpty) ...[
+                    _buildSectionHeader(
+                      icon: Icons.event,
+                      title: '일정',
+                      count: dayEvents.length,
+                      color: AppTheme.accent,
+                    ),
+                    ...dayEvents.map((event) => _buildCalendarEventItem(event)),
+                    const SizedBox(height: 16),
+                  ],
+                  
+                  // === TODO SECTION ===
+                  _buildSectionHeader(
+                    icon: Icons.check_circle_outline,
+                    title: '할 일',
+                    count: todos.length,
+                    color: AppTheme.textSecondary,
+                  ),
+                  
+                  // Todos
                   if (todos.isEmpty && !_isAddingTodo)
-                    _buildEmptyState()
+                    _buildEmptySectionMessage('할 일이 없습니다. 아래에서 추가하세요.')
                   else
                     ...todos.map((todo) => _buildTodoItem(context, provider, todo)),
                   
@@ -119,471 +155,437 @@ class _CombinedScreenState extends State<CombinedScreen> {
     );
   }
 
-  Widget _buildCalendarSection(AppProvider provider) {
-    return Column(
-      children: [
-        // Header
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-          child: Row(
-            children: [
-              Text(
-                DateFormat('yyyy년 M월').format(_focusedDate),
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w500,
-                  color: AppTheme.textPrimary,
-                ),
-              ),
-              const Spacer(),
-              // View mode toggle
-              _buildViewModeToggle(),
-            ],
-          ),
-        ),
-        
-        // Calendar view
-        if (_viewMode == CalendarViewMode.month)
-          _buildMonthView(provider)
-        else
-          _buildWeekView(provider),
-      ],
-    );
-  }
-
-  Widget _buildViewModeToggle() {
-    return Row(
-      children: [
-        _buildToggleButton('월', CalendarViewMode.month),
-        const SizedBox(width: 8),
-        _buildToggleButton('주', CalendarViewMode.week),
-      ],
-    );
-  }
-
-  Widget _buildToggleButton(String label, CalendarViewMode mode) {
-    final isSelected = _viewMode == mode;
-    return GestureDetector(
-      onTap: () {
-        setState(() => _viewMode = mode);
-        _tryLoadGoogleEvents();
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected ? AppTheme.textPrimary : Colors.transparent,
-          border: Border.all(
-            color: isSelected ? AppTheme.textPrimary : AppTheme.divider,
-          ),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: isSelected ? AppTheme.background : AppTheme.textSecondary,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMonthView(AppProvider provider) {
-    return SizedBox(
-      height: 280,
-      child: PageView.builder(
-        controller: _monthPageController,
-        onPageChanged: (index) {
-          final monthOffset = index - 500;
-          final now = DateTime.now();
-          setState(() {
-            _focusedDate = DateTime(now.year, now.month + monthOffset, 1);
-          });
-          _tryLoadGoogleEvents();
-        },
-        itemBuilder: (context, index) {
-          final monthOffset = index - 500;
-          final now = DateTime.now();
-          final monthDate = DateTime(now.year, now.month + monthOffset, 1);
-          return _buildMonthGrid(provider, monthDate);
-        },
-      ),
-    );
-  }
-
-  Widget _buildMonthGrid(AppProvider provider, DateTime monthDate) {
-    final firstDay = DateTime(monthDate.year, monthDate.month, 1);
-    final lastDay = DateTime(monthDate.year, monthDate.month + 1, 0);
-    final startWeekday = firstDay.weekday;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        children: [
-          // Weekday headers
-          Row(
-            children: ['월', '화', '수', '목', '금', '토', '일'].map((day) {
-              return Expanded(
-                child: Center(
-                  child: Text(
-                    day,
-                    style: const TextStyle(fontSize: 12, color: AppTheme.textTertiary),
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 8),
-          
-          // Days grid
-          Expanded(
-            child: GridView.builder(
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 7,
-                mainAxisSpacing: 2,
-                crossAxisSpacing: 2,
-              ),
-              itemCount: 42,
-              itemBuilder: (context, index) {
-                final dayOffset = index - (startWeekday - 1);
-                if (dayOffset < 1 || dayOffset > lastDay.day) {
-                  return const SizedBox();
-                }
-                
-                final date = DateTime(monthDate.year, monthDate.month, dayOffset);
-                final isToday = DateUtils.isSameDay(date, DateTime.now());
-                final isSelected = DateUtils.isSameDay(date, provider.selectedDate);
-                final hasGoogleEvents = _googleEvents.any((e) => DateUtils.isSameDay(e.start, date));
-                
-                return GestureDetector(
-                  onTap: () {
-                    provider.setSelectedDate(date);
-                    _showDatePopup(context, provider, date);
-                  },
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: isSelected 
-                          ? AppTheme.accent 
-                          : isToday 
-                              ? AppTheme.accentLight 
-                              : null,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          '$dayOffset',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isSelected 
-                                ? Colors.white 
-                                : isToday 
-                                    ? AppTheme.accent 
-                                    : AppTheme.textPrimary,
-                            fontWeight: isToday || isSelected ? FontWeight.w600 : FontWeight.w400,
-                          ),
-                        ),
-                        if (hasGoogleEvents)
-                          Container(
-                            width: 4,
-                            height: 4,
-                            margin: const EdgeInsets.only(top: 2),
-                            decoration: BoxDecoration(
-                              color: isSelected ? Colors.white : AppTheme.accent,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildWeekView(AppProvider provider) {
-    return SizedBox(
-      height: 100,
-      child: ListView.builder(
-        controller: _weekScrollController,
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        itemBuilder: (context, index) {
-          // Infinite scroll: index 0 = today, negative = past, positive = future
-          final date = DateTime.now().add(Duration(days: index - 365));
-          final isToday = DateUtils.isSameDay(date, DateTime.now());
-          final isSelected = DateUtils.isSameDay(date, provider.selectedDate);
-          
-          return GestureDetector(
-            onTap: () {
-              provider.setSelectedDate(date);
-            },
-            child: Container(
-              width: 50,
-              margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-              decoration: BoxDecoration(
-                color: isSelected 
-                    ? AppTheme.accent 
-                    : isToday 
-                        ? AppTheme.accentLight 
-                        : AppTheme.surface,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: isSelected || isToday ? AppTheme.accent : AppTheme.divider,
-                ),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    DateFormat('E', 'ko').format(date).substring(0, 1),
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: isSelected 
-                          ? Colors.white 
-                          : AppTheme.textTertiary,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${date.day}',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: isSelected || isToday ? FontWeight.w600 : FontWeight.w400,
-                      color: isSelected 
-                          ? Colors.white 
-                          : isToday 
-                              ? AppTheme.accent 
-                              : AppTheme.textPrimary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  void _showDatePopup(BuildContext context, AppProvider provider, DateTime date) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.background,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) {
-        return Consumer<AppProvider>(
-          builder: (context, provider, _) {
-            final todos = provider.organizedTodos;
-            final dayEvents = _googleEvents.where((e) => DateUtils.isSameDay(e.start, date)).toList();
-            
-            return Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        DateFormat('M월 d일 (E)', 'ko').format(date),
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        icon: const Icon(Icons.close, size: 20),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  // Google Calendar events
-                  if (dayEvents.isNotEmpty) ...[
-                    const Text(
-                      'Google 캘린더',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    ...dayEvents.map((event) => Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppTheme.accentLight,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.event, size: 16, color: AppTheme.accent),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  event.summary,
-                                  style: const TextStyle(fontSize: 14),
-                                ),
-                                Text(
-                                  '${DateFormat('HH:mm').format(event.start)} - ${DateFormat('HH:mm').format(event.end)}',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: AppTheme.textSecondary,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    )),
-                    const SizedBox(height: 16),
-                  ],
-                  
-                  // Todos
-                  const Text(
-                    '할 일',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  
-                  if (todos.isEmpty)
-                    const Text(
-                      '할 일이 없습니다',
-                      style: TextStyle(color: AppTheme.textTertiary),
-                    )
-                  else
-                    ...todos.take(5).map((todo) => Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: AppTheme.surface,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 18,
-                            height: 18,
-                            decoration: BoxDecoration(
-                              color: todo.completed ? AppTheme.accent : Colors.transparent,
-                              border: Border.all(
-                                color: todo.completed ? AppTheme.accent : AppTheme.textTertiary,
-                              ),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: todo.completed
-                                ? const Icon(Icons.check, size: 12, color: Colors.white)
-                                : null,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              todo.text,
-                              style: TextStyle(
-                                fontSize: 14,
-                                decoration: todo.completed ? TextDecoration.lineThrough : null,
-                                color: todo.completed ? AppTheme.textTertiary : AppTheme.textPrimary,
-                              ),
-                            ),
-                          ),
-                          if (todo.estimatedTime != null)
-                            Text(
-                              '${todo.estimatedTime}분',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: AppTheme.textSecondary,
-                              ),
-                            ),
-                        ],
-                      ),
-                    )),
-                  
-                  if (todos.length > 5)
-                    Text(
-                      '외 ${todos.length - 5}개 더보기',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.textTertiary,
-                      ),
-                    ),
-                  
-                  const SizedBox(height: 16),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildDateHeader(DateTime date, bool isToday, AppProvider provider) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+    final now = DateTime.now();
+    final todayButtonWidth = 56.0;
+    
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
       child: Row(
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                isToday ? '오늘' : DateFormat('EEEE', 'ko').format(date),
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w500,
-                  color: AppTheme.textPrimary,
-                ),
+          // Scrollable date buttons
+          Expanded(
+            child: SizedBox(
+              height: 56,
+              child: ListView.builder(
+                controller: _weekScrollController,
+                scrollDirection: Axis.horizontal,
+                itemCount: 730,
+                itemBuilder: (context, index) {
+                  final date = now.add(Duration(days: index - 365));
+                  final isToday = DateUtils.isSameDay(date, now);
+                  final isSelected = DateUtils.isSameDay(date, provider.selectedDate);
+                  final allEventsForDot = provider.calendarEvents.isNotEmpty ? provider.calendarEvents : _googleEvents;
+                  final hasGoogleEvents = allEventsForDot.any((e) => DateUtils.isSameDay(e.start, date));
+                  
+                  return GestureDetector(
+                    onTap: () {
+                      provider.setSelectedDate(date);
+                      _tryLoadGoogleEvents();
+                    },
+                    child: Container(
+                      width: 46,
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      decoration: BoxDecoration(
+                        color: isSelected 
+                            ? AppTheme.accent 
+                            : isToday 
+                                ? AppTheme.accentLight 
+                                : AppTheme.surface,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isSelected || isToday ? AppTheme.accent : AppTheme.divider,
+                        ),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            '${date.month}/${date.day}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: isSelected || isToday ? FontWeight.w600 : FontWeight.w400,
+                              color: isSelected 
+                                  ? Colors.white 
+                                  : isToday 
+                                      ? AppTheme.accent 
+                                      : AppTheme.textPrimary,
+                            ),
+                          ),
+                          Text(
+                            DateFormat('E', 'ko').format(date),
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: isSelected 
+                                  ? Colors.white.withValues(alpha: 0.8)
+                                  : AppTheme.textTertiary,
+                            ),
+                          ),
+                          if (hasGoogleEvents)
+                            Container(
+                              width: 4,
+                              height: 4,
+                              margin: const EdgeInsets.only(top: 2),
+                              decoration: BoxDecoration(
+                                color: isSelected ? Colors.white : AppTheme.accent,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
               ),
-              Text(
-                DateFormat('yyyy년 M월 d일').format(date),
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppTheme.textTertiary,
-                ),
-              ),
-            ],
+            ),
           ),
-          const Spacer(),
-          // Today button
-          if (!isToday)
-            GestureDetector(
-              onTap: () => provider.setSelectedDate(DateTime.now()),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  border: Border.all(color: AppTheme.accent),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: const Text(
+          
+          // Fixed "Today" button on right
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () {
+              provider.setSelectedDate(DateTime.now());
+              final viewportWidth = MediaQuery.of(context).size.width;
+              final availableWidth = viewportWidth - todayButtonWidth - 24;
+              final itemWidth = 52.0;
+              final centerOffset = (availableWidth - itemWidth) / 2;
+              final scrollTarget = (365 * itemWidth) - centerOffset;
+              _weekScrollController.animateTo(
+                scrollTarget.clamp(0.0, _weekScrollController.position.maxScrollExtent),
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOut,
+              );
+            },
+            child: Container(
+              width: todayButtonWidth,
+              height: 56,
+              decoration: BoxDecoration(
+                border: Border.all(color: AppTheme.accent),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Center(
+                child: Text(
                   '오늘',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
                     color: AppTheme.accent,
                   ),
                 ),
               ),
             ),
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDateHeader(DateTime date, bool isToday, AppProvider provider) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+      child: Row(
+        children: [
+          Text(
+            DateFormat('yyyy년 M월 d일 (E)', 'ko').format(date),
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w500,
+              color: AppTheme.textPrimary,
+            ),
+          ),
+          if (isToday) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppTheme.accent,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Text(
+                '오늘',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCalendarEventItem(CalendarEvent event) {
+    return GestureDetector(
+      onTap: () => _showEditCalendarEventDialog(context, event),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppTheme.accentLight,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppTheme.accent.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 4,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppTheme.accent,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    event.summary,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: AppTheme.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${DateFormat('HH:mm').format(event.start)} - ${DateFormat('HH:mm').format(event.end)}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Edit icon
+            IconButton(
+              icon: const Icon(Icons.edit_outlined, size: 18, color: AppTheme.accent),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              onPressed: () => _showEditCalendarEventDialog(context, event),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  void _showEditCalendarEventDialog(BuildContext dialogContext, CalendarEvent event) {
+    final titleController = TextEditingController(text: event.summary);
+    DateTime selectedDate = event.start;
+    TimeOfDay startTime = TimeOfDay.fromDateTime(event.start);
+    TimeOfDay endTime = TimeOfDay.fromDateTime(event.end);
+
+    showDialog(
+      context: dialogContext,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('일정 수정'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 기존 일정 정보 표시
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: AppTheme.accentLight,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('기존 일정', style: TextStyle(fontSize: 11, color: AppTheme.textTertiary)),
+                      const SizedBox(height: 4),
+                      Text(event.summary, style: const TextStyle(fontWeight: FontWeight.w500)),
+                      Text(
+                        '${DateFormat('M/d HH:mm').format(event.start)} - ${DateFormat('HH:mm').format(event.end)}',
+                        style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+                
+                TextField(
+                  controller: titleController,
+                  decoration: const InputDecoration(
+                    labelText: '일정 제목',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                
+                // Date picker
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.calendar_today, size: 20),
+                  title: Text(DateFormat('yyyy년 M월 d일').format(selectedDate)),
+                  onTap: () async {
+                    final date = await showDatePicker(
+                      context: ctx,
+                      initialDate: selectedDate,
+                      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (date != null) setDialogState(() => selectedDate = date);
+                  },
+                ),
+                
+                // Start time
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.access_time, size: 20),
+                  title: Text('시작: ${startTime.hour.toString().padLeft(2, '0')}:${startTime.minute.toString().padLeft(2, '0')}'),
+                  onTap: () async {
+                    final time = await showTimePicker(
+                      context: ctx,
+                      initialTime: startTime,
+                    );
+                    if (time != null) setDialogState(() => startTime = time);
+                  },
+                ),
+                
+                // End time
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.access_time_filled, size: 20),
+                  title: Text('종료: ${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}'),
+                  onTap: () async {
+                    final time = await showTimePicker(
+                      context: ctx,
+                      initialTime: endTime,
+                    );
+                    if (time != null) setDialogState(() => endTime = time);
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('취소'),
+            ),
+            TextButton(
+              onPressed: () async {
+                final provider = Provider.of<AppProvider>(ctx, listen: false);
+                final success = await provider.deleteCalendarEvent(event.id);
+                if (ctx.mounted) {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(
+                    SnackBar(
+                      content: Text(success ? '일정이 삭제되었습니다' : '삭제 실패'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                  if (success) _tryLoadGoogleEvents();
+                }
+              },
+              child: const Text('삭제', style: TextStyle(color: AppTheme.error)),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (titleController.text.trim().isEmpty) return;
+                
+                final provider = Provider.of<AppProvider>(ctx, listen: false);
+                final newStart = DateTime(
+                  selectedDate.year, selectedDate.month, selectedDate.day,
+                  startTime.hour, startTime.minute,
+                );
+                final newEnd = DateTime(
+                  selectedDate.year, selectedDate.month, selectedDate.day,
+                  endTime.hour, endTime.minute,
+                );
+                
+                final success = await provider.updateCalendarEvent(
+                  eventId: event.id,
+                  title: titleController.text.trim(),
+                  start: newStart,
+                  end: newEnd,
+                );
+                
+                if (ctx.mounted) {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(
+                    SnackBar(
+                      content: Text(success ? '일정이 수정되었습니다' : '수정 실패'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                  if (success) _tryLoadGoogleEvents();
+                }
+              },
+              child: const Text('저장'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader({
+    required IconData icon,
+    required String title,
+    required int count,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        border: Border(
+          bottom: BorderSide(color: AppTheme.divider.withValues(alpha: 0.5), width: 1),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              '$count',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildEmptySectionMessage(String message) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
+      child: Text(
+        message,
+        style: const TextStyle(
+          fontSize: 13,
+          color: AppTheme.textTertiary,
+          fontStyle: FontStyle.italic,
+        ),
       ),
     );
   }
@@ -623,28 +625,168 @@ class _CombinedScreenState extends State<CombinedScreen> {
   Widget _buildTodoItem(BuildContext context, AppProvider provider, TodoModel todo) {
     final indentLevel = provider.getIndentLevel(todo);
     final isEditing = _editingTodoId == todo.id;
+    final organizedTodos = provider.organizedTodos;
+    final todoIndex = organizedTodos.indexOf(todo);
+    final isDropTarget = _dropTargetIndex == todoIndex;
     
     if (isEditing) {
       return _buildInlineEditItem(provider, todo, indentLevel);
     }
     
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (details) {
+        if (details.data == todo.id) return false;
+        return true;
+      },
+      onAcceptWithDetails: (details) async {
+        final draggedTodoId = details.data;
+        final draggedTodo = provider.todos.firstWhere((t) => t.id == draggedTodoId);
+        
+        // 하위로 추가 (타겟이 depth 0이고 오른쪽 영역에 드롭 - 20% 이상)
+        if (_dropAsChild && indentLevel == 0) {
+          // 현재 todo의 자식으로 설정
+          final updatedTodo = draggedTodo.copyWith(parentId: todo.id);
+          await provider.updateTodo(updatedTodo);
+        } 
+        // 타겟이 하위 항목(indentLevel > 0)인 경우: 같은 부모 아래로 이동
+        else if (indentLevel > 0) {
+          // 타겟의 부모를 드래그된 항목의 부모로 설정
+          if (draggedTodo.parentId != todo.parentId) {
+            final updatedTodo = draggedTodo.copyWith(parentId: todo.parentId);
+            await provider.updateTodo(updatedTodo);
+          }
+          // 순서 변경
+          final oldIndex = organizedTodos.indexOf(draggedTodo);
+          if (oldIndex != todoIndex) {
+            await provider.reorderTodos(oldIndex, todoIndex);
+          }
+        }
+        // 기본: 최상위로 이동 (순서 변경) - 타겟이 최상위이고 20% 이하 영역
+        else {
+          // 드래그된 항목이 하위 항목이면 최상위로 이동
+          if (draggedTodo.parentId != null) {
+            final updatedTodo = draggedTodo.copyWith(parentId: null);
+            await provider.updateTodo(updatedTodo);
+          }
+          // 순서 변경
+          final oldIndex = organizedTodos.indexOf(draggedTodo);
+          if (oldIndex != todoIndex) {
+            await provider.reorderTodos(oldIndex, todoIndex);
+          }
+        }
+        setState(() {
+          _dropTargetIndex = null;
+          _dropAsChild = false;
+        });
+      },
+      onMove: (details) {
+        setState(() {
+          _dropTargetIndex = todoIndex;
+          final dx = details.offset.dx;
+          final screenWidth = MediaQuery.of(context).size.width;
+          // 오른쪽 20% 이상: 하위로 (타겟이 depth 0인 경우만)
+          _dropAsChild = dx > screenWidth * 0.2 && indentLevel == 0;
+        });
+      },
+      onLeave: (_) {
+        if (_dropTargetIndex == todoIndex) {
+          setState(() {
+            _dropTargetIndex = null;
+            _dropAsChild = false;
+          });
+        }
+      },
+      builder: (context, candidateData, rejectedData) {
+        final isHovering = candidateData.isNotEmpty;
+        
+        return Draggable<String>(
+          data: todo.id,
+          onDragStarted: () => setState(() {}),
+          onDragEnd: (_) => setState(() {
+            _dropTargetIndex = null;
+            _dropAsChild = false;
+          }),
+          feedback: Material(
+            elevation: 4,
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              width: MediaQuery.of(context).size.width * 0.9,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.background,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppTheme.accent, width: 2),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.drag_indicator, color: AppTheme.accent, size: 20),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      todo.text,
+                      style: const TextStyle(fontSize: 14, color: AppTheme.textPrimary),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          childWhenDragging: Opacity(
+            opacity: 0.3,
+            child: _buildTodoItemContent(context, provider, todo, indentLevel, false, false),
+          ),
+          child: _buildTodoItemContent(
+            context, provider, todo, indentLevel,
+            isHovering, _dropAsChild && isDropTarget,
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTodoItemContent(
+    BuildContext context,
+    AppProvider provider,
+    TodoModel todo,
+    int indentLevel,
+    bool isDropTarget,
+    bool dropAsChild,
+  ) {
     return GestureDetector(
       onTap: () => _startInlineEdit(todo),
       child: Container(
         padding: EdgeInsets.only(
-          left: 20.0 + (indentLevel * 24),
+          left: 8.0 + (indentLevel * 24),  // 드래그 핸들 공간 확보
           right: 8,
           top: 12,
           bottom: 12,
         ),
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
+          color: isDropTarget 
+              ? (dropAsChild ? AppTheme.accentLight : AppTheme.surface)
+              : Colors.transparent,
           border: Border(
-            bottom: BorderSide(color: AppTheme.divider, width: 0.5),
+            bottom: const BorderSide(color: AppTheme.divider, width: 0.5),
+            left: isDropTarget && dropAsChild 
+                ? const BorderSide(color: AppTheme.accent, width: 3)
+                : BorderSide.none,
+            top: isDropTarget && !dropAsChild
+                ? const BorderSide(color: AppTheme.accent, width: 2)
+                : BorderSide.none,
           ),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Drag Handle
+            const Padding(
+              padding: EdgeInsets.only(top: 2),
+              child: Icon(Icons.drag_indicator, size: 20, color: AppTheme.textTertiary),
+            ),
+            const SizedBox(width: 4),
+            
             // Checkbox
             GestureDetector(
               onTap: () => provider.toggleTodoComplete(todo),
@@ -716,7 +858,6 @@ class _CombinedScreenState extends State<CombinedScreen> {
                 padding: EdgeInsets.zero,
                 onSelected: (minutes) async {
                   if (minutes == -1) {
-                    // Clear time - explicitly set to null
                     await provider.firestoreService.updateTodo(
                       todo.copyWith(estimatedTime: null),
                     );
@@ -735,15 +876,23 @@ class _CombinedScreenState extends State<CombinedScreen> {
                 ],
               ),
             ],
+            // Delete button
+            IconButton(
+              icon: const Icon(Icons.delete_outline, size: 20, color: AppTheme.textTertiary),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              onPressed: () {
+                provider.deleteTodo(todo.id);
+              },
+            ),
+            // More menu (calendar, routine, indent/outdent)
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, size: 20, color: AppTheme.textTertiary),
               padding: EdgeInsets.zero,
               onSelected: (value) => _handleTodoAction(context, provider, todo, value),
               itemBuilder: (context) => [
-                const PopupMenuItem(value: 'edit', child: Text('수정')),
                 const PopupMenuItem(value: 'calendar', child: Text('캘린더에 추가')),
                 const PopupMenuItem(value: 'routine', child: Text('루틴으로 만들기')),
-                const PopupMenuItem(value: 'delete', child: Text('삭제')),
               ],
             ),
           ],
@@ -755,7 +904,7 @@ class _CombinedScreenState extends State<CombinedScreen> {
   Widget _buildInlineEditItem(AppProvider provider, TodoModel todo, int indentLevel) {
     return Container(
       padding: EdgeInsets.only(
-        left: 20.0 + (indentLevel * 24),
+        left: 8.0 + (indentLevel * 24),
         right: 8,
         top: 12,
         bottom: 12,
@@ -768,7 +917,12 @@ class _CombinedScreenState extends State<CombinedScreen> {
       ),
       child: Row(
         children: [
-          // Checkbox
+          // Drag Handle placeholder (disabled during edit)
+          const Padding(
+            padding: EdgeInsets.only(top: 2),
+            child: Icon(Icons.drag_indicator, size: 20, color: AppTheme.textTertiary),
+          ),
+          const SizedBox(width: 4),
           Container(
             width: 22,
             height: 22,
@@ -778,8 +932,6 @@ class _CombinedScreenState extends State<CombinedScreen> {
             ),
           ),
           const SizedBox(width: 12),
-          
-          // Edit field
           Expanded(
             child: TextField(
               controller: _editController,
@@ -794,14 +946,10 @@ class _CombinedScreenState extends State<CombinedScreen> {
               onSubmitted: (_) => _saveInlineEdit(provider, todo),
             ),
           ),
-          
-          // Save button
           IconButton(
             icon: const Icon(Icons.check, color: AppTheme.accent),
             onPressed: () => _saveInlineEdit(provider, todo),
           ),
-          
-          // Cancel button
           IconButton(
             icon: const Icon(Icons.close, color: AppTheme.textTertiary),
             onPressed: _cancelInlineEdit,
@@ -989,24 +1137,10 @@ class _CombinedScreenState extends State<CombinedScreen> {
         Future.delayed(const Duration(milliseconds: 50), () {
           if (mounted && _isAddingTodo) _newTodoFocus.requestFocus();
         });
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('할 일이 추가되었습니다'),
-            duration: Duration(seconds: 1),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isSubmitting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('추가 실패: $e'),
-            backgroundColor: AppTheme.error,
-          ),
-        );
       }
     }
   }
@@ -1026,24 +1160,11 @@ class _CombinedScreenState extends State<CombinedScreen> {
 
   void _handleTodoAction(BuildContext context, AppProvider provider, TodoModel todo, String action) {
     switch (action) {
-      case 'edit':
-        _showEditTodoDialog(context, provider, todo);
-        break;
       case 'calendar':
         _showAddToCalendarDialog(context, provider, todo);
         break;
       case 'routine':
         _showMakeRoutineDialog(context, provider, todo);
-        break;
-      case 'delete':
-        provider.deleteTodo(todo.id);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('삭제되었습니다'),
-            duration: Duration(seconds: 1),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
         break;
     }
   }
@@ -1093,7 +1214,7 @@ class _CombinedScreenState extends State<CombinedScreen> {
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
-                            time == null ? '없음' : (time < 60 ? '${time}분' : '${time ~/ 60}시간'),
+                            time == null ? '없음' : (time < 60 ? '$time분' : '${time ~/ 60}시간'),
                             style: TextStyle(
                               fontSize: 13,
                               color: estimatedTime == time ? AppTheme.background : AppTheme.textSecondary,
@@ -1114,7 +1235,6 @@ class _CombinedScreenState extends State<CombinedScreen> {
             ElevatedButton(
               onPressed: () async {
                 if (controller.text.trim().isNotEmpty) {
-                  // Update both text and estimated time
                   final updatedTodo = todo.copyWith(
                     text: controller.text.trim(),
                     estimatedTime: estimatedTime,
@@ -1198,6 +1318,10 @@ class _CombinedScreenState extends State<CombinedScreen> {
                 );
                 if (context.mounted) {
                   Navigator.pop(context);
+                  if (success) {
+                    // 캘린더 이벤트 즉시 새로고침
+                    _tryLoadGoogleEvents();
+                  }
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(success ? '캘린더에 추가되었습니다' : '추가 실패. 다시 로그인하여 권한을 부여해주세요.'),

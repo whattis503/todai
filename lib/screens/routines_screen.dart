@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
 import '../providers/app_provider.dart';
 import '../models/routine_model.dart';
 import '../theme/app_theme.dart';
@@ -142,15 +143,6 @@ class RoutinesScreen extends StatelessWidget {
           GestureDetector(
             onTap: () async {
               await provider.updateRoutine(routine.copyWith(isActive: !routine.isActive));
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(routine.isActive ? '루틴이 일시정지되었습니다' : '루틴이 활성화되었습니다'),
-                    duration: const Duration(seconds: 1),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-              }
             },
             child: Container(
               width: 22,
@@ -209,6 +201,17 @@ class RoutinesScreen extends StatelessWidget {
                     ],
                   ],
                 ),
+                // 유효기간 표시
+                if (routine.endDate != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    '~${DateFormat('M/d').format(routine.endDate!)}까지',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppTheme.textTertiary,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -234,17 +237,15 @@ class RoutinesScreen extends StatelessWidget {
   }
 
   String _getRepetitionKr(RoutineModel routine) {
-    switch (routine.repetitionType) {
-      case RepetitionType.daily:
-        return '매일';
-      case RepetitionType.weeklyOnce:
-        if (routine.weekdays.isEmpty) return '주간';
-        final days = ['', '월', '화', '수', '목', '금', '토', '일'];
-        final dayNames = routine.weekdays.map((d) => days[d]).join(', ');
-        return '매주 $dayNames';
-      case RepetitionType.weeklyN:
-        return '주 ${routine.repetitionCount}회';
+    if (routine.weekdays.isEmpty) {
+      return '매일';
     }
+    if (routine.weekdays.length == 7) {
+      return '매일';
+    }
+    final days = ['', '월', '화', '수', '목', '금', '토', '일'];
+    final dayNames = routine.weekdays.map((d) => days[d]).join(', ');
+    return '매주 $dayNames';
   }
 
   void _showCreateRoutineDialog(BuildContext context, AppProvider provider) {
@@ -258,9 +259,10 @@ class RoutinesScreen extends StatelessWidget {
   void _showRoutineDialog(BuildContext context, AppProvider provider, RoutineModel? routine) {
     final textController = TextEditingController(text: routine?.text ?? '');
     int? estimatedTime = routine?.estimatedTime;
-    RepetitionType repetitionType = routine?.repetitionType ?? RepetitionType.daily;
-    int repetitionCount = routine?.repetitionCount ?? 1;
     Set<int> selectedWeekdays = Set.from(routine?.weekdays ?? []);
+    DateTime startDate = routine?.startDate ?? DateTime.now();
+    DateTime? endDate = routine?.endDate;
+    bool hasEndDate = endDate != null;
     bool isSubmitting = false;
 
     showDialog(
@@ -314,7 +316,7 @@ class RoutinesScreen extends StatelessWidget {
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
-                            time == null ? '없음' : (time < 60 ? '${time}분' : '${time ~/ 60}시간'),
+                            time == null ? '없음' : (time < 60 ? '$time분' : '${time ~/ 60}시간'),
                             style: TextStyle(
                               fontSize: 13,
                               color: estimatedTime == time ? AppTheme.background : AppTheme.textSecondary,
@@ -326,85 +328,178 @@ class RoutinesScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 20),
 
-                // Repetition type
-                const Text(
-                  '반복 주기',
-                  style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                // 반복 요일 선택 (드롭다운 없이 바로 표시)
+                Row(
+                  children: [
+                    const Text(
+                      '반복 요일',
+                      style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                    ),
+                    const Spacer(),
+                    // 전체 선택 체크박스
+                    GestureDetector(
+                      onTap: () {
+                        setDialogState(() {
+                          if (selectedWeekdays.length == 7) {
+                            selectedWeekdays.clear();
+                          } else {
+                            selectedWeekdays = {1, 2, 3, 4, 5, 6, 7};
+                          }
+                        });
+                      },
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 18,
+                            height: 18,
+                            decoration: BoxDecoration(
+                              color: selectedWeekdays.length == 7 ? AppTheme.accent : Colors.transparent,
+                              border: Border.all(
+                                color: selectedWeekdays.length == 7 ? AppTheme.accent : AppTheme.divider,
+                              ),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: selectedWeekdays.length == 7
+                                ? const Icon(Icons.check, size: 14, color: Colors.white)
+                                : null,
+                          ),
+                          const SizedBox(width: 6),
+                          const Text(
+                            '매일',
+                            style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 8),
-                DropdownButton<RepetitionType>(
-                  value: repetitionType,
-                  isExpanded: true,
-                  items: const [
-                    DropdownMenuItem(value: RepetitionType.daily, child: Text('매일')),
-                    DropdownMenuItem(value: RepetitionType.weeklyOnce, child: Text('특정 요일')),
-                    DropdownMenuItem(value: RepetitionType.weeklyN, child: Text('주 N회')),
-                  ],
-                  onChanged: (value) => setDialogState(() => repetitionType = value!),
-                ),
-
-                if (repetitionType == RepetitionType.weeklyN) ...[
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      const Text('주당 횟수: '),
-                      DropdownButton<int>(
-                        value: repetitionCount,
-                        items: List.generate(7, (i) => i + 1)
-                            .map((n) => DropdownMenuItem(value: n, child: Text('$n회')))
-                            .toList(),
-                        onChanged: (value) => setDialogState(() => repetitionCount = value!),
-                      ),
-                    ],
-                  ),
-                ],
-
-                if (repetitionType != RepetitionType.daily) ...[
-                  const SizedBox(height: 12),
-                  const Text(
-                    '요일 선택',
-                    style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final day in [(1, '월'), (2, '화'), (3, '수'), (4, '목'), (5, '금'), (6, '토'), (7, '일')])
-                        GestureDetector(
-                          onTap: () {
-                            setDialogState(() {
-                              if (selectedWeekdays.contains(day.$1)) {
-                                selectedWeekdays.remove(day.$1);
-                              } else {
-                                selectedWeekdays.add(day.$1);
-                              }
-                            });
-                          },
-                          child: Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: selectedWeekdays.contains(day.$1) ? AppTheme.accent : Colors.transparent,
-                              border: Border.all(
-                                color: selectedWeekdays.contains(day.$1) ? AppTheme.accent : AppTheme.divider,
-                              ),
-                              borderRadius: BorderRadius.circular(6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final day in [(1, '월'), (2, '화'), (3, '수'), (4, '목'), (5, '금'), (6, '토'), (7, '일')])
+                      GestureDetector(
+                        onTap: () {
+                          setDialogState(() {
+                            if (selectedWeekdays.contains(day.$1)) {
+                              selectedWeekdays.remove(day.$1);
+                            } else {
+                              selectedWeekdays.add(day.$1);
+                            }
+                          });
+                        },
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: selectedWeekdays.contains(day.$1) ? AppTheme.accent : Colors.transparent,
+                            border: Border.all(
+                              color: selectedWeekdays.contains(day.$1) ? AppTheme.accent : AppTheme.divider,
                             ),
-                            child: Center(
-                              child: Text(
-                                day.$2,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: selectedWeekdays.contains(day.$1) ? Colors.white : AppTheme.textSecondary,
-                                ),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Center(
+                            child: Text(
+                              day.$2,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: selectedWeekdays.contains(day.$1) ? Colors.white : AppTheme.textSecondary,
                               ),
                             ),
                           ),
                         ),
-                    ],
+                      ),
+                  ],
+                ),
+                
+                const SizedBox(height: 20),
+                
+                // 유효 기간
+                const Text(
+                  '반복 유효 기간',
+                  style: TextStyle(fontSize: 12, color: AppTheme.textSecondary),
+                ),
+                const SizedBox(height: 8),
+                
+                // 시작일
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  leading: const Icon(Icons.play_arrow, size: 20, color: AppTheme.textTertiary),
+                  title: Text(
+                    '시작: ${DateFormat('yyyy년 M월 d일').format(startDate)}',
+                    style: const TextStyle(fontSize: 14),
                   ),
-                ],
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: dialogContext,
+                      initialDate: startDate,
+                      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                      lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
+                    );
+                    if (picked != null) {
+                      setDialogState(() => startDate = picked);
+                    }
+                  },
+                ),
+                
+                // 종료일
+                Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () {
+                        setDialogState(() {
+                          hasEndDate = !hasEndDate;
+                          if (!hasEndDate) endDate = null;
+                        });
+                      },
+                      child: Container(
+                        width: 18,
+                        height: 18,
+                        decoration: BoxDecoration(
+                          color: hasEndDate ? AppTheme.accent : Colors.transparent,
+                          border: Border.all(
+                            color: hasEndDate ? AppTheme.accent : AppTheme.divider,
+                          ),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: hasEndDate
+                            ? const Icon(Icons.check, size: 14, color: Colors.white)
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        leading: const Icon(Icons.stop, size: 20, color: AppTheme.textTertiary),
+                        title: Text(
+                          hasEndDate 
+                              ? '종료: ${DateFormat('yyyy년 M월 d일').format(endDate ?? DateTime.now())}'
+                              : '종료: 무기한',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: hasEndDate ? AppTheme.textPrimary : AppTheme.textTertiary,
+                          ),
+                        ),
+                        onTap: hasEndDate ? () async {
+                          final picked = await showDatePicker(
+                            context: dialogContext,
+                            initialDate: endDate ?? startDate.add(const Duration(days: 30)),
+                            firstDate: startDate,
+                            lastDate: DateTime.now().add(const Duration(days: 365 * 3)),
+                          );
+                          if (picked != null) {
+                            setDialogState(() => endDate = picked);
+                          }
+                        } : null,
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -416,14 +511,13 @@ class RoutinesScreen extends StatelessWidget {
             ElevatedButton(
               onPressed: isSubmitting ? null : () async {
                 if (textController.text.trim().isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('루틴 이름을 입력해주세요'),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
                   return;
                 }
+                
+                // 요일이 하나도 선택되지 않으면 매일로 설정
+                final weekdaysList = selectedWeekdays.isEmpty 
+                    ? <int>[1, 2, 3, 4, 5, 6, 7]
+                    : selectedWeekdays.toList()..sort();
 
                 setDialogState(() => isSubmitting = true);
 
@@ -433,41 +527,30 @@ class RoutinesScreen extends StatelessWidget {
                       routine.copyWith(
                         text: textController.text.trim(),
                         estimatedTime: estimatedTime,
-                        repetitionType: repetitionType,
-                        repetitionCount: repetitionCount,
-                        weekdays: selectedWeekdays.toList()..sort(),
+                        repetitionType: RepetitionType.weeklyOnce,
+                        weekdays: weekdaysList,
+                        startDate: startDate,
+                        endDate: hasEndDate ? endDate : null,
+                        clearEndDate: !hasEndDate,
                       ),
                     );
                   } else {
                     await provider.createRoutine(
                       text: textController.text.trim(),
                       estimatedTime: estimatedTime,
-                      repetitionType: repetitionType,
-                      repetitionCount: repetitionCount,
-                      weekdays: selectedWeekdays.toList()..sort(),
+                      repetitionType: RepetitionType.weeklyOnce,
+                      repetitionCount: 1,
+                      weekdays: weekdaysList,
+                      startDate: startDate,
+                      endDate: hasEndDate ? endDate : null,
                     );
                   }
 
                   if (dialogContext.mounted) {
                     Navigator.pop(dialogContext);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(routine != null ? '루틴이 수정되었습니다' : '루틴이 생성되었습니다'),
-                        duration: const Duration(seconds: 1),
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
                   }
                 } catch (e) {
                   setDialogState(() => isSubmitting = false);
-                  if (dialogContext.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('오류: $e'),
-                        backgroundColor: AppTheme.error,
-                      ),
-                    );
-                  }
                 }
               },
               style: ElevatedButton.styleFrom(
@@ -504,13 +587,6 @@ class RoutinesScreen extends StatelessWidget {
               await provider.deleteRoutine(routine.id);
               if (dialogContext.mounted) {
                 Navigator.pop(dialogContext);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('루틴이 삭제되었습니다'),
-                    duration: Duration(seconds: 1),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
               }
             },
             style: ElevatedButton.styleFrom(

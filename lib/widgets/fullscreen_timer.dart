@@ -227,17 +227,56 @@ class _FullscreenTimerState extends State<FullscreenTimer> {
                     ],
                   ),
                   
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 24),
                   
-                  // Close without saving
-                  GestureDetector(
-                    onTap: _exitWithoutSaving,
-                    child: Text(
-                      'Exit without saving',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppTheme.textTertiary,
+                  // Reset and Exit buttons row
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Reset timer button
+                      GestureDetector(
+                        onTap: _resetTimer,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.refresh, size: 16, color: AppTheme.textTertiary),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Reset',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: AppTheme.textTertiary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
+                      
+                      const SizedBox(width: 24),
+                      
+                      // Exit (pause and save)
+                      GestureDetector(
+                        onTap: _exitAndPause,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.exit_to_app, size: 16, color: AppTheme.textTertiary),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Exit',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: AppTheme.textTertiary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   
                   const Spacer(),
@@ -348,32 +387,61 @@ class _FullscreenTimerState extends State<FullscreenTimer> {
     );
   }
 
-  void _exitWithoutSaving() {
+  void _resetTimer() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Exit Timer'),
+        title: const Text('Reset Timer'),
         content: const Text(
-          'Exit without saving? Your time will be lost.',
+          '타이머를 0부터 다시 시작하시겠습니까?',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: const Text('취소'),
           ),
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              Navigator.pop(context);
+              _performReset();
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.error,
-            ),
-            child: const Text('Exit'),
+            child: const Text('초기화'),
           ),
         ],
       ),
     );
+  }
+  
+  void _performReset() {
+    final provider = Provider.of<AppProvider>(context, listen: false);
+    
+    // Reset the timer in Firestore
+    provider.resetTimer(_todo);
+    
+    // Reset local state
+    setState(() {
+      _elapsedSeconds = 0;
+      _isPaused = false;
+      _isOvertime = false;
+    });
+    
+    // Restart the timer
+    provider.startTimer(_todo);
+  }
+  
+  void _exitAndPause() {
+    // Pause and save current time, then exit without popup
+    final provider = Provider.of<AppProvider>(context, listen: false);
+    
+    // Update todo with current elapsed time
+    final updatedTodo = _todo.copyWith(
+      timerPausedDuration: _elapsedSeconds,
+      clearTimerStartedAt: true,
+    );
+    provider.pauseTimerWithDuration(updatedTodo, _elapsedSeconds);
+    
+    // Exit immediately
+    Navigator.pop(context);
   }
 
   void _saveAndExit({required bool completed}) {

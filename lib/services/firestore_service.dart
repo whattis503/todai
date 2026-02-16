@@ -249,6 +249,8 @@ class FirestoreService {
     RepetitionType repetitionType = RepetitionType.daily,
     int repetitionCount = 1,
     List<int> weekdays = const [],
+    DateTime? startDate,
+    DateTime? endDate,
   }) async {
     final collection = _routinesCollection;
     if (collection == null) {
@@ -264,6 +266,8 @@ class FirestoreService {
       repetitionCount: repetitionCount,
       weekdays: weekdays,
       createdAt: DateTime.now(),
+      startDate: startDate,
+      endDate: endDate,
     );
     
     await docRef.set(routine.toFirestore());

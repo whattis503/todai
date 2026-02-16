@@ -14,6 +14,7 @@ class AIChatDialog extends StatefulWidget {
 class _AIChatDialogState extends State<AIChatDialog> {
   final TextEditingController _messageController = TextEditingController();
   final TextEditingController _apiKeyController = TextEditingController();
+  final FocusNode _messageFocusNode = FocusNode();
   final List<_ChatMessage> _messages = [];
   List<FunctionCall>? _pendingCalls;
   bool _isLoading = false;
@@ -26,6 +27,13 @@ class _AIChatDialogState extends State<AIChatDialog> {
     final provider = Provider.of<AppProvider>(context, listen: false);
     if (!provider.hasGeminiApiKey) {
       _showApiKeyInput = true;
+    } else {
+      // API 키가 있으면 자동으로 입력창에 포커스
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_showApiKeyInput) {
+          _messageFocusNode.requestFocus();
+        }
+      });
     }
   }
 
@@ -33,6 +41,7 @@ class _AIChatDialogState extends State<AIChatDialog> {
   void dispose() {
     _messageController.dispose();
     _apiKeyController.dispose();
+    _messageFocusNode.dispose();
     super.dispose();
   }
 
@@ -137,33 +146,95 @@ class _AIChatDialogState extends State<AIChatDialog> {
     }
 
     if (_messages.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.chat_outlined,
-                size: 32,
-                color: AppTheme.textTertiary.withValues(alpha: 0.5),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                '할 일 관리를 도와드릴게요',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppTheme.textTertiary,
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.chat_outlined,
+                  size: 28,
+                  color: AppTheme.textTertiary.withValues(alpha: 0.5),
                 ),
-                textAlign: TextAlign.center,
+                const SizedBox(width: 8),
+                Text(
+                  '할 일 관리를 도와드릴게요',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            
+            // Available Functions
+            const Text(
+              '사용 가능한 기능',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppTheme.textPrimary,
               ),
-              const SizedBox(height: 8),
-              const Text(
-                '예: "아침 운동 30분, 점심 1시간, 보고서 2시간 추가해줘"',
-                style: TextStyle(fontSize: 12, color: AppTheme.textTertiary),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 12),
+            
+            // TODO Functions
+            _buildFunctionCategory(
+              icon: Icons.check_circle_outline,
+              title: '할 일',
+              color: AppTheme.accent,
+              functions: [
+                '추가: "운동하기 30분 할일 추가해줘"',
+                '수정: "운동하기를 헬스장 가기로 변경해줘"',
+                '삭제: "운동하기 삭제해줘"',
+                '완료: "운동하기 완료해줘"',
+              ],
+            ),
+            const SizedBox(height: 12),
+            
+            // Routine Functions
+            _buildFunctionCategory(
+              icon: Icons.repeat,
+              title: '루틴',
+              color: Colors.orange,
+              functions: [
+                '추가: "매일 아침 운동 루틴 만들어줘"',
+                '추가: "월수금 영어 공부 루틴 만들어줘"',
+                '수정: "운동 루틴을 저녁 운동으로 바꿔줘"',
+                '삭제: "운동 루틴 삭제해줘"',
+              ],
+            ),
+            const SizedBox(height: 12),
+            
+            // Calendar Functions
+            _buildFunctionCategory(
+              icon: Icons.event,
+              title: '캘린더',
+              color: Colors.blue,
+              functions: [
+                '추가: "내일 2시에 회의 일정 추가해줘"',
+                '수정: "회의 일정을 3시로 변경해줘"',
+                '삭제: "회의 일정 삭제해줘"',
+              ],
+            ),
+            const SizedBox(height: 12),
+            
+            // Conversion Functions
+            _buildFunctionCategory(
+              icon: Icons.swap_horiz,
+              title: '변환',
+              color: Colors.purple,
+              functions: [
+                '"운동하기를 내일 2시에 캘린더에 추가해줘"',
+                '"운동하기를 매일 루틴으로 만들어줘"',
+              ],
+            ),
+          ],
         ),
       );
     }
@@ -391,6 +462,7 @@ class _AIChatDialogState extends State<AIChatDialog> {
           Expanded(
             child: TextField(
               controller: _messageController,
+              focusNode: _messageFocusNode,
               enabled: provider.hasGeminiApiKey && !_showApiKeyInput,
               decoration: InputDecoration(
                 hintText: provider.hasGeminiApiKey 
@@ -566,4 +638,55 @@ class _ChatMessage {
   final bool isUser;
 
   _ChatMessage({required this.text, required this.isUser});
+}
+
+Widget _buildFunctionCategory({
+  required IconData icon,
+  required String title,
+  required Color color,
+  required List<String> functions,
+}) {
+  return Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.05),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: color.withValues(alpha: 0.2)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 6),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ...functions.map((f) => Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('• ', style: TextStyle(fontSize: 11, color: AppTheme.textTertiary)),
+              Expanded(
+                child: Text(
+                  f,
+                  style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                ),
+              ),
+            ],
+          ),
+        )),
+      ],
+    ),
+  );
 }

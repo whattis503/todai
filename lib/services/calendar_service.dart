@@ -19,10 +19,13 @@ class CalendarEvent {
   });
 
   factory CalendarEvent.fromJson(Map<String, dynamic> json) {
+    // Parse datetime and convert to Korea timezone (UTC+9)
     DateTime parseDateTime(Map<String, dynamic>? dateTime) {
       if (dateTime == null) return DateTime.now();
       if (dateTime['dateTime'] != null) {
-        return DateTime.parse(dateTime['dateTime']);
+        final parsed = DateTime.parse(dateTime['dateTime']);
+        // Convert to local time (Korea Standard Time)
+        return parsed.toLocal();
       }
       if (dateTime['date'] != null) {
         return DateTime.parse(dateTime['date']);
@@ -38,6 +41,20 @@ class CalendarEvent {
       description: json['description'],
     );
   }
+}
+
+// Helper to format datetime for Google Calendar API (Korea timezone)
+String _toKoreaIso8601(DateTime dt) {
+  // Ensure the datetime is treated as Korea time (UTC+9)
+  final koreaTime = dt.toLocal();
+  final offset = '+09:00';
+  final formatted = '${koreaTime.year.toString().padLeft(4, '0')}-'
+      '${koreaTime.month.toString().padLeft(2, '0')}-'
+      '${koreaTime.day.toString().padLeft(2, '0')}T'
+      '${koreaTime.hour.toString().padLeft(2, '0')}:'
+      '${koreaTime.minute.toString().padLeft(2, '0')}:'
+      '${koreaTime.second.toString().padLeft(2, '0')}$offset';
+  return formatted;
 }
 
 class CalendarService {
@@ -157,11 +174,11 @@ class CalendarService {
           'summary': summary,
           'description': description,
           'start': {
-            'dateTime': startTime.toIso8601String(),
+            'dateTime': _toKoreaIso8601(startTime),
             'timeZone': 'Asia/Seoul',
           },
           'end': {
-            'dateTime': endTime.toIso8601String(),
+            'dateTime': _toKoreaIso8601(endTime),
             'timeZone': 'Asia/Seoul',
           },
         }),
@@ -212,5 +229,102 @@ class CalendarService {
       endTime: endTime,
       description: 'Created from Todai',
     );
+  }
+  
+  Future<bool> updateEvent({
+    required String eventId,
+    required String title,
+    required DateTime start,
+    required DateTime end,
+    String? description,
+  }) async {
+    _lastError = null;
+    
+    if (_accessToken == null || _accessToken!.isEmpty) {
+      _lastError = 'No access token available';
+      return false;
+    }
+
+    try {
+      final response = await http.put(
+        Uri.parse('$_baseUrl/calendars/primary/events/$eventId'),
+        headers: {
+          'Authorization': 'Bearer $_accessToken',
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({
+          'summary': title,
+          'description': description,
+          'start': {
+            'dateTime': _toKoreaIso8601(start),
+            'timeZone': 'Asia/Seoul',
+          },
+          'end': {
+            'dateTime': _toKoreaIso8601(end),
+            'timeZone': 'Asia/Seoul',
+          },
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        if (kDebugMode) {
+          debugPrint('CalendarService: Event updated successfully');
+        }
+        return true;
+      } else {
+        _lastError = 'Failed to update event: ${response.statusCode}';
+        if (kDebugMode) {
+          debugPrint('CalendarService: Error updating event: ${response.statusCode}');
+          debugPrint('Response: ${response.body}');
+        }
+        return false;
+      }
+    } catch (e) {
+      _lastError = 'Network error: $e';
+      if (kDebugMode) {
+        debugPrint('CalendarService: Error updating calendar event: $e');
+      }
+      return false;
+    }
+  }
+  
+  Future<bool> deleteEvent(String eventId) async {
+    _lastError = null;
+    
+    if (_accessToken == null || _accessToken!.isEmpty) {
+      _lastError = 'No access token available';
+      return false;
+    }
+
+    try {
+      final response = await http.delete(
+        Uri.parse('$_baseUrl/calendars/primary/events/$eventId'),
+        headers: {
+          'Authorization': 'Bearer $_accessToken',
+          'Content-Type': 'application/json',
+        },
+      );
+
+      // 204 No Content is the success response for delete
+      if (response.statusCode == 204 || response.statusCode == 200) {
+        if (kDebugMode) {
+          debugPrint('CalendarService: Event deleted successfully');
+        }
+        return true;
+      } else {
+        _lastError = 'Failed to delete event: ${response.statusCode}';
+        if (kDebugMode) {
+          debugPrint('CalendarService: Error deleting event: ${response.statusCode}');
+          debugPrint('Response: ${response.body}');
+        }
+        return false;
+      }
+    } catch (e) {
+      _lastError = 'Network error: $e';
+      if (kDebugMode) {
+        debugPrint('CalendarService: Error deleting calendar event: $e');
+      }
+      return false;
+    }
   }
 }

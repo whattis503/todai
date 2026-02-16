@@ -70,7 +70,7 @@ class TodoModel {
     DateTime? date,
     Object? estimatedTime = _sentinel,
     Object? actualTime = _sentinel,
-    String? parentId,
+    Object? parentId = _sentinel,
     int? order,
     bool? isRolledOver,
     DateTime? timerStartedAt,
@@ -89,7 +89,9 @@ class TodoModel {
       actualTime: actualTime == _sentinel 
           ? this.actualTime 
           : actualTime as int?,
-      parentId: parentId ?? this.parentId,
+      parentId: parentId == _sentinel 
+          ? this.parentId 
+          : parentId as String?,
       order: order ?? this.order,
       isRolledOver: isRolledOver ?? this.isRolledOver,
       timerStartedAt: clearTimerStartedAt ? null : (timerStartedAt ?? this.timerStartedAt),

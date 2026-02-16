@@ -16,31 +16,118 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0; // Combined (Calendar + Today) is default
 
-  final List<Widget> _screens = const [
-    CombinedScreen(),
-    RoutinesScreen(),
+  List<Widget> get _screens => [
+    const CombinedScreen(),
+    const RoutinesScreen(),
+    _buildProfileScreen(),
   ];
+
+  Widget _buildProfileScreen() {
+    return Consumer<AppProvider>(
+      builder: (context, provider, _) {
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '마이페이지',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 24),
+              
+              // User info card
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppTheme.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.divider),
+                ),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 24,
+                      backgroundColor: AppTheme.accentLight,
+                      child: Text(
+                        (provider.user?.email?.substring(0, 1) ?? 'U').toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.accent,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            provider.user?.displayName ?? '사용자',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                              color: AppTheme.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            provider.user?.email ?? '',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              const SizedBox(height: 24),
+              
+              // Logout button
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => provider.signOut(),
+                  icon: const Icon(Icons.logout, size: 18),
+                  label: const Text('로그아웃'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.textSecondary,
+                    side: const BorderSide(color: AppTheme.divider),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final mediaQuery = MediaQuery.of(context);
-    final topPadding = mediaQuery.padding.top;
-    final bottomPadding = mediaQuery.padding.bottom;
-
+    final topPadding = MediaQuery.of(context).padding.top;
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: Column(
         children: [
-          // Top safe area
+          // 상단 SafeArea 공간 확보
           Container(
-            height: topPadding,
+            height: topPadding > 0 ? topPadding : 16,
             color: AppTheme.background,
           ),
-          
-          // App Bar
-          _buildAppBar(context),
-          
-          // Main content
+          // 메인 콘텐츠
           Expanded(
             child: IndexedStack(
               index: _currentIndex,
@@ -49,46 +136,53 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      bottomNavigationBar: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            decoration: const BoxDecoration(
-              color: AppTheme.background,
-              border: Border(
-                top: BorderSide(color: AppTheme.divider, width: 0.5),
+      bottomNavigationBar: Container(
+        color: AppTheme.background,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              decoration: const BoxDecoration(
+                border: Border(
+                  top: BorderSide(color: AppTheme.divider, width: 0.5),
+                ),
+              ),
+              child: BottomNavigationBar(
+                currentIndex: _currentIndex,
+                onTap: (index) => setState(() => _currentIndex = index),
+                backgroundColor: AppTheme.background,
+                elevation: 0,
+                selectedItemColor: AppTheme.textPrimary,
+                unselectedItemColor: AppTheme.textTertiary,
+                selectedLabelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
+                unselectedLabelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w400),
+                type: BottomNavigationBarType.fixed,
+                items: const [
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.calendar_today_outlined, size: 22),
+                    activeIcon: Icon(Icons.calendar_today, size: 22),
+                    label: '오늘',
+                  ),
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.repeat_outlined, size: 22),
+                    activeIcon: Icon(Icons.repeat, size: 22),
+                    label: '루틴',
+                  ),
+                  BottomNavigationBarItem(
+                    icon: Icon(Icons.person_outline, size: 22),
+                    activeIcon: Icon(Icons.person, size: 22),
+                    label: '마이페이지',
+                  ),
+                ],
               ),
             ),
-            child: BottomNavigationBar(
-              currentIndex: _currentIndex,
-              onTap: (index) => setState(() => _currentIndex = index),
-              backgroundColor: Colors.transparent,
-              elevation: 0,
-              selectedItemColor: AppTheme.textPrimary,
-              unselectedItemColor: AppTheme.textTertiary,
-              selectedLabelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
-              unselectedLabelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w400),
-              type: BottomNavigationBarType.fixed,
-              items: const [
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.calendar_today_outlined, size: 22),
-                  activeIcon: Icon(Icons.calendar_today, size: 22),
-                  label: '오늘',
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.repeat_outlined, size: 22),
-                  activeIcon: Icon(Icons.repeat, size: 22),
-                  label: '루틴',
-                ),
-              ],
+            // 하단 SafeArea 공간 확보
+            Container(
+              height: bottomPadding > 0 ? bottomPadding : 8,
+              color: AppTheme.background,
             ),
-          ),
-          // Bottom safe area
-          Container(
-            height: bottomPadding,
-            color: AppTheme.background,
-          ),
-        ],
+          ],
+        ),
       ),
       floatingActionButton: Padding(
         padding: EdgeInsets.only(bottom: bottomPadding > 0 ? 0 : 8),
@@ -102,72 +196,6 @@ class _HomeScreenState extends State<HomeScreen> {
             color: AppTheme.accent,
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildAppBar(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const BoxDecoration(
-        color: AppTheme.background,
-        border: Border(
-          bottom: BorderSide(color: AppTheme.divider, width: 0.5),
-        ),
-      ),
-      child: Row(
-        children: [
-          const Text(
-            'todai',
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w300,
-              color: AppTheme.textPrimary,
-              letterSpacing: -0.5,
-            ),
-          ),
-          const Spacer(),
-          Consumer<AppProvider>(
-            builder: (context, provider, _) {
-              return PopupMenuButton<String>(
-                icon: const Icon(
-                  Icons.person_outline,
-                  size: 24,
-                  color: AppTheme.textSecondary,
-                ),
-                offset: const Offset(0, 45),
-                onSelected: (value) async {
-                  if (value == 'signout') {
-                    await provider.signOut();
-                  }
-                },
-                itemBuilder: (context) => [
-                  PopupMenuItem(
-                    enabled: false,
-                    child: Text(
-                      provider.user?.email ?? 'User',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                  ),
-                  const PopupMenuDivider(),
-                  const PopupMenuItem(
-                    value: 'signout',
-                    child: Row(
-                      children: [
-                        Icon(Icons.logout, size: 18, color: AppTheme.textSecondary),
-                        SizedBox(width: 8),
-                        Text('로그아웃'),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-        ],
       ),
     );
   }
