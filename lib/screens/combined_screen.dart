@@ -644,7 +644,7 @@ class _CombinedScreenState extends State<CombinedScreen> {
   // Multi-select action bar
   Widget _buildMultiSelectActionBar(AppProvider provider) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: AppTheme.accentLight,
         border: Border(
@@ -661,7 +661,7 @@ class _CombinedScreenState extends State<CombinedScreen> {
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(
-              '${_selectedTodoIds.length}개 선택',
+              '${_selectedTodoIds.length}개',
               style: const TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
@@ -670,41 +670,81 @@ class _CombinedScreenState extends State<CombinedScreen> {
             ),
           ),
           const Spacer(),
+          // Date change button
+          TextButton.icon(
+            onPressed: () => _changeSelectedTodosDate(context, provider),
+            icon: const Icon(Icons.calendar_today, size: 16),
+            label: const Text('날짜'),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.blue,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+            ),
+          ),
           // Complete all button
           TextButton.icon(
             onPressed: () => _completeSelectedTodos(provider),
-            icon: const Icon(Icons.check_circle, size: 18),
+            icon: const Icon(Icons.check_circle, size: 16),
             label: const Text('완료'),
             style: TextButton.styleFrom(
               foregroundColor: Colors.green,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
             ),
           ),
-          const SizedBox(width: 8),
           // Delete all button
           TextButton.icon(
             onPressed: () => _deleteSelectedTodos(provider),
-            icon: const Icon(Icons.delete_outline, size: 18),
+            icon: const Icon(Icons.delete_outline, size: 16),
             label: const Text('삭제'),
             style: TextButton.styleFrom(
               foregroundColor: AppTheme.error,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
             ),
           ),
-          const SizedBox(width: 8),
           // Cancel selection button
-          TextButton.icon(
+          IconButton(
             onPressed: _clearSelection,
-            icon: const Icon(Icons.close, size: 18),
-            label: const Text('취소'),
-            style: TextButton.styleFrom(
-              foregroundColor: AppTheme.textSecondary,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-            ),
+            icon: const Icon(Icons.close, size: 20),
+            color: AppTheme.textSecondary,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
           ),
         ],
       ),
     );
+  }
+  
+  Future<void> _changeSelectedTodosDate(BuildContext context, AppProvider provider) async {
+    final selectedDate = await showDatePicker(
+      context: context,
+      initialDate: provider.selectedDate,
+      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      locale: const Locale('ko', 'KR'),
+    );
+    
+    if (selectedDate != null) {
+      final selectedIds = _selectedTodoIds.toList();
+      for (final id in selectedIds) {
+        final todo = provider.todos.firstWhere(
+          (t) => t.id == id,
+          orElse: () => throw Exception('Todo not found'),
+        );
+        final updatedTodo = todo.copyWith(date: selectedDate);
+        await provider.updateTodo(updatedTodo);
+      }
+      
+      _clearSelection();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${selectedIds.length}개 할 일의 날짜가 변경되었습니다'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
   }
   
   void _toggleTodoSelection(String todoId) {
@@ -1095,6 +1135,25 @@ class _CombinedScreenState extends State<CombinedScreen> {
                   ],
                 ),
               ],
+              // Undo complete button for completed todos
+              if (todo.completed)
+                IconButton(
+                  icon: const Icon(Icons.undo, size: 20),
+                  color: AppTheme.textSecondary,
+                  onPressed: () {
+                    provider.toggleTodoComplete(todo);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('완료 취소됨'),
+                        behavior: SnackBarBehavior.floating,
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
+                  },
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                  tooltip: '완료 취소',
+                ),
               // More menu (calendar, routine, complete, delete)
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert, size: 20, color: AppTheme.textTertiary),
@@ -1137,12 +1196,19 @@ class _CombinedScreenState extends State<CombinedScreen> {
             child: Icon(Icons.drag_indicator, size: 20, color: AppTheme.textTertiary),
           ),
           const SizedBox(width: 4),
-          Container(
-            width: 22,
-            height: 22,
-            decoration: BoxDecoration(
-              border: Border.all(color: AppTheme.accent, width: 1.5),
-              borderRadius: BorderRadius.circular(6),
+          // Checkbox - clickable during edit (cancels edit and selects)
+          GestureDetector(
+            onTap: () {
+              _cancelInlineEdit();
+              _toggleTodoSelection(todo.id);
+            },
+            child: Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                border: Border.all(color: AppTheme.accent, width: 1.5),
+                borderRadius: BorderRadius.circular(6),
+              ),
             ),
           ),
           const SizedBox(width: 12),
