@@ -724,21 +724,31 @@ class _CombinedScreenState extends State<CombinedScreen> {
     
     if (selectedDate != null) {
       final selectedIds = _selectedTodoIds.toList();
+      int updatedCount = 0;
+      
       for (final id in selectedIds) {
-        final todo = provider.todos.firstWhere(
-          (t) => t.id == id,
-          orElse: () => throw Exception('Todo not found'),
-        );
-        final updatedTodo = todo.copyWith(date: selectedDate);
-        await provider.updateTodo(updatedTodo);
+        try {
+          // Find todo from organizedTodos (which includes all visible todos)
+          final allTodos = provider.organizedTodos;
+          final todoIndex = allTodos.indexWhere((t) => t.id == id);
+          if (todoIndex != -1) {
+            final todo = allTodos[todoIndex];
+            final updatedTodo = todo.copyWith(date: selectedDate);
+            await provider.updateTodo(updatedTodo);
+            updatedCount++;
+          }
+        } catch (e) {
+          // Skip if todo not found
+          continue;
+        }
       }
       
       _clearSelection();
       
-      if (mounted) {
+      if (mounted && updatedCount > 0) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('${selectedIds.length}개 할 일의 날짜가 변경되었습니다'),
+            content: Text('$updatedCount개 할 일의 날짜가 변경되었습니다'),
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 2),
           ),
