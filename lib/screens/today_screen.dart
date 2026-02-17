@@ -277,10 +277,10 @@ class _TodayScreenState extends State<TodayScreen> {
                 }
               },
               itemBuilder: (context) => [
-                const PopupMenuItem(value: 1, child: Text('+1 min')),
                 const PopupMenuItem(value: 5, child: Text('+5 min')),
                 const PopupMenuItem(value: 10, child: Text('+10 min')),
                 const PopupMenuItem(value: 30, child: Text('+30 min')),
+                const PopupMenuItem(value: 60, child: Text('+1 hour')),
                 if (todo.estimatedTime != null)
                   const PopupMenuItem(value: -1, child: Text('Clear time')),
               ],

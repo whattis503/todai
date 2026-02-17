@@ -33,6 +33,10 @@ class _CombinedScreenState extends State<CombinedScreen> {
   // Drag reordering
   int? _dropTargetIndex;
   bool _dropAsChild = false;  // true면 하위로 들어감
+  
+  // Multi-select mode
+  Set<String> _selectedTodoIds = {};
+  bool get _isMultiSelectMode => _selectedTodoIds.isNotEmpty;
 
   @override
   void initState() {
@@ -101,6 +105,9 @@ class _CombinedScreenState extends State<CombinedScreen> {
         // Get calendar events for selected date (use provider's events directly)
         final allEvents = provider.calendarEvents.isNotEmpty ? provider.calendarEvents : _googleEvents;
         final dayEvents = allEvents.where((e) => DateUtils.isSameDay(e.start, selectedDate)).toList();
+        
+        // Calculate total estimated time
+        final totalEstimatedMinutes = todos.fold<int>(0, (sum, todo) => sum + (todo.estimatedTime ?? 0));
 
         return Column(
           children: [
@@ -135,7 +142,11 @@ class _CombinedScreenState extends State<CombinedScreen> {
                     title: '할 일',
                     count: todos.length,
                     color: AppTheme.textSecondary,
+                    totalMinutes: totalEstimatedMinutes,
                   ),
+                  
+                  // Multi-select action bar
+                  if (_isMultiSelectMode) _buildMultiSelectActionBar(provider),
                   
                   // Todos
                   if (todos.isEmpty && !_isAddingTodo)
@@ -534,7 +545,21 @@ class _CombinedScreenState extends State<CombinedScreen> {
     required String title,
     required int count,
     required Color color,
+    int? totalMinutes,
   }) {
+    // Format total time
+    String formatTotalTime(int minutes) {
+      if (minutes >= 60) {
+        final hours = minutes ~/ 60;
+        final mins = minutes % 60;
+        if (mins > 0) {
+          return '$hours시간 $mins분';
+        }
+        return '$hours시간';
+      }
+      return '$minutes분';
+    }
+    
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
       decoration: BoxDecoration(
@@ -571,6 +596,32 @@ class _CombinedScreenState extends State<CombinedScreen> {
               ),
             ),
           ),
+          // Total estimated time
+          if (totalMinutes != null) ...[  
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppTheme.accentLight,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.schedule, size: 11, color: AppTheme.accent),
+                  const SizedBox(width: 4),
+                  Text(
+                    formatTotalTime(totalMinutes),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: AppTheme.accent,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -588,6 +639,150 @@ class _CombinedScreenState extends State<CombinedScreen> {
         ),
       ),
     );
+  }
+  
+  // Multi-select action bar
+  Widget _buildMultiSelectActionBar(AppProvider provider) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppTheme.accentLight,
+        border: Border(
+          bottom: BorderSide(color: AppTheme.accent.withValues(alpha: 0.3)),
+        ),
+      ),
+      child: Row(
+        children: [
+          // Selected count
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppTheme.accent,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              '${_selectedTodoIds.length}개 선택',
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ),
+          const Spacer(),
+          // Complete all button
+          TextButton.icon(
+            onPressed: () => _completeSelectedTodos(provider),
+            icon: const Icon(Icons.check_circle, size: 18),
+            label: const Text('완료'),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.green,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Delete all button
+          TextButton.icon(
+            onPressed: () => _deleteSelectedTodos(provider),
+            icon: const Icon(Icons.delete_outline, size: 18),
+            label: const Text('삭제'),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.error,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Cancel selection button
+          TextButton.icon(
+            onPressed: _clearSelection,
+            icon: const Icon(Icons.close, size: 18),
+            label: const Text('취소'),
+            style: TextButton.styleFrom(
+              foregroundColor: AppTheme.textSecondary,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  void _toggleTodoSelection(String todoId) {
+    setState(() {
+      if (_selectedTodoIds.contains(todoId)) {
+        _selectedTodoIds.remove(todoId);
+      } else {
+        _selectedTodoIds.add(todoId);
+      }
+    });
+  }
+  
+  void _clearSelection() {
+    setState(() {
+      _selectedTodoIds.clear();
+    });
+  }
+  
+  Future<void> _completeSelectedTodos(AppProvider provider) async {
+    final selectedIds = _selectedTodoIds.toList();
+    for (final todoId in selectedIds) {
+      final todo = provider.todos.firstWhere((t) => t.id == todoId, orElse: () => provider.todos.first);
+      if (!todo.completed) {
+        await provider.toggleTodoComplete(todo);
+      }
+    }
+    _clearSelection();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${selectedIds.length}개 할 일 완료'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    }
+  }
+  
+  Future<void> _deleteSelectedTodos(AppProvider provider) async {
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('삭제 확인'),
+        content: Text('선택한 ${_selectedTodoIds.length}개의 할 일을 삭제하시겠습니까?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.error,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirmed == true) {
+      final selectedIds = _selectedTodoIds.toList();
+      for (final todoId in selectedIds) {
+        await provider.deleteTodo(todoId);
+      }
+      _clearSelection();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${selectedIds.length}개 할 일 삭제됨'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+    }
   }
 
   Widget _buildEmptyState() {
@@ -754,8 +949,17 @@ class _CombinedScreenState extends State<CombinedScreen> {
     bool isDropTarget,
     bool dropAsChild,
   ) {
+    final isSelected = _selectedTodoIds.contains(todo.id);
+    
     return GestureDetector(
-      onTap: () => _startInlineEdit(todo),
+      onTap: () {
+        if (_isMultiSelectMode) {
+          // In multi-select mode, tap toggles selection
+          _toggleTodoSelection(todo.id);
+        } else {
+          _startInlineEdit(todo);
+        }
+      },
       child: Container(
         padding: EdgeInsets.only(
           left: 8.0 + (indentLevel * 24),  // 드래그 핸들 공간 확보
@@ -764,14 +968,18 @@ class _CombinedScreenState extends State<CombinedScreen> {
           bottom: 12,
         ),
         decoration: BoxDecoration(
-          color: isDropTarget 
-              ? (dropAsChild ? AppTheme.accentLight : AppTheme.surface)
-              : Colors.transparent,
+          color: isSelected 
+              ? AppTheme.accentLight
+              : isDropTarget 
+                  ? (dropAsChild ? AppTheme.accentLight : AppTheme.surface)
+                  : Colors.transparent,
           border: Border(
             bottom: const BorderSide(color: AppTheme.divider, width: 0.5),
             left: isDropTarget && dropAsChild 
                 ? const BorderSide(color: AppTheme.accent, width: 3)
-                : BorderSide.none,
+                : isSelected
+                    ? const BorderSide(color: AppTheme.accent, width: 3)
+                    : BorderSide.none,
             top: isDropTarget && !dropAsChild
                 ? const BorderSide(color: AppTheme.accent, width: 2)
                 : BorderSide.none,
@@ -787,24 +995,34 @@ class _CombinedScreenState extends State<CombinedScreen> {
             ),
             const SizedBox(width: 4),
             
-            // Checkbox
+            // Checkbox - now for multi-select
             GestureDetector(
-              onTap: () => provider.toggleTodoComplete(todo),
+              onTap: () => _toggleTodoSelection(todo.id),
               child: Container(
                 width: 22,
                 height: 22,
                 margin: const EdgeInsets.only(top: 2),
                 decoration: BoxDecoration(
-                  color: todo.completed ? AppTheme.accent : Colors.transparent,
+                  color: isSelected 
+                      ? AppTheme.accent 
+                      : todo.completed 
+                          ? AppTheme.textTertiary 
+                          : Colors.transparent,
                   border: Border.all(
-                    color: todo.completed ? AppTheme.accent : AppTheme.textTertiary,
+                    color: isSelected 
+                        ? AppTheme.accent 
+                        : todo.completed 
+                            ? AppTheme.textTertiary 
+                            : AppTheme.textTertiary,
                     width: 1.5,
                   ),
                   borderRadius: BorderRadius.circular(6),
                 ),
-                child: todo.completed
+                child: isSelected
                     ? const Icon(Icons.check, size: 16, color: Colors.white)
-                    : null,
+                    : todo.completed
+                        ? const Icon(Icons.check, size: 16, color: Colors.white)
+                        : null,
               ),
             ),
             const SizedBox(width: 12),
@@ -841,60 +1059,56 @@ class _CombinedScreenState extends State<CombinedScreen> {
               ),
             ),
             
-            // Actions
-            if (!todo.completed) ...[
-              IconButton(
-                icon: Icon(
-                  todo.timerStartedAt != null ? Icons.pause : Icons.play_arrow_outlined,
-                  size: 22,
+            // Actions (hidden in multi-select mode)
+            if (!_isMultiSelectMode) ...[
+              if (!todo.completed) ...[
+                IconButton(
+                  icon: Icon(
+                    todo.timerStartedAt != null ? Icons.pause : Icons.play_arrow_outlined,
+                    size: 22,
+                  ),
+                  color: AppTheme.accent,
+                  onPressed: () => _showFullscreenTimer(context, provider, todo),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                 ),
-                color: AppTheme.accent,
-                onPressed: () => _showFullscreenTimer(context, provider, todo),
+                PopupMenuButton<int>(
+                  icon: const Icon(Icons.schedule_outlined, size: 20, color: AppTheme.textTertiary),
+                  padding: EdgeInsets.zero,
+                  onSelected: (minutes) async {
+                    if (minutes == -1) {
+                      await provider.firestoreService.updateTodo(
+                        todo.copyWith(estimatedTime: null),
+                      );
+                    } else {
+                      final current = todo.estimatedTime ?? 0;
+                      await provider.updateTodoEstimatedTime(todo, current + minutes);
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(value: 5, child: Text('+5분')),
+                    const PopupMenuItem(value: 10, child: Text('+10분')),
+                    const PopupMenuItem(value: 30, child: Text('+30분')),
+                    const PopupMenuItem(value: 60, child: Text('+1시간')),
+                    if (todo.estimatedTime != null)
+                      const PopupMenuItem(value: -1, child: Text('시간 삭제')),
+                  ],
+                ),
+              ],
+              // More menu (calendar, routine, complete, delete)
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, size: 20, color: AppTheme.textTertiary),
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-              ),
-              PopupMenuButton<int>(
-                icon: const Icon(Icons.schedule_outlined, size: 20, color: AppTheme.textTertiary),
-                padding: EdgeInsets.zero,
-                onSelected: (minutes) async {
-                  if (minutes == -1) {
-                    await provider.firestoreService.updateTodo(
-                      todo.copyWith(estimatedTime: null),
-                    );
-                  } else {
-                    final current = todo.estimatedTime ?? 0;
-                    await provider.updateTodoEstimatedTime(todo, current + minutes);
-                  }
-                },
+                onSelected: (value) => _handleTodoAction(context, provider, todo, value),
                 itemBuilder: (context) => [
-                  const PopupMenuItem(value: 1, child: Text('+1분')),
-                  const PopupMenuItem(value: 5, child: Text('+5분')),
-                  const PopupMenuItem(value: 10, child: Text('+10분')),
-                  const PopupMenuItem(value: 30, child: Text('+30분')),
-                  if (todo.estimatedTime != null)
-                    const PopupMenuItem(value: -1, child: Text('시간 삭제')),
+                  if (!todo.completed)
+                    const PopupMenuItem(value: 'complete', child: Text('완료하기')),
+                  const PopupMenuItem(value: 'calendar', child: Text('캘린더에 추가')),
+                  const PopupMenuItem(value: 'routine', child: Text('루틴으로 만들기')),
+                  const PopupMenuItem(value: 'delete', child: Text('삭제')),
                 ],
               ),
             ],
-            // Delete button
-            IconButton(
-              icon: const Icon(Icons.delete_outline, size: 20, color: AppTheme.textTertiary),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-              onPressed: () {
-                provider.deleteTodo(todo.id);
-              },
-            ),
-            // More menu (calendar, routine, indent/outdent)
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, size: 20, color: AppTheme.textTertiary),
-              padding: EdgeInsets.zero,
-              onSelected: (value) => _handleTodoAction(context, provider, todo, value),
-              itemBuilder: (context) => [
-                const PopupMenuItem(value: 'calendar', child: Text('캘린더에 추가')),
-                const PopupMenuItem(value: 'routine', child: Text('루틴으로 만들기')),
-              ],
-            ),
           ],
         ),
       ),
@@ -1160,6 +1374,26 @@ class _CombinedScreenState extends State<CombinedScreen> {
 
   void _handleTodoAction(BuildContext context, AppProvider provider, TodoModel todo, String action) {
     switch (action) {
+      case 'complete':
+        provider.toggleTodoComplete(todo);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('할 일 완료'),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 1),
+          ),
+        );
+        break;
+      case 'delete':
+        provider.deleteTodo(todo.id);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('할 일 삭제됨'),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 1),
+          ),
+        );
+        break;
       case 'calendar':
         _showAddToCalendarDialog(context, provider, todo);
         break;

@@ -117,9 +117,9 @@ class CalendarService {
         
         return items.map((item) => CalendarEvent.fromJson(item)).toList();
       } else if (response.statusCode == 401) {
-        _lastError = 'Authentication expired. Please sign out and sign in again.';
+        _lastError = 'TOKEN_EXPIRED';
         if (kDebugMode) {
-          debugPrint('CalendarService: 401 Unauthorized - token may be invalid');
+          debugPrint('CalendarService: 401 Unauthorized - token expired, needs refresh');
           debugPrint('Response: ${response.body}');
         }
         return [];

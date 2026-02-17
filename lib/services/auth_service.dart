@@ -28,6 +28,10 @@ class AuthService {
   
   static const String _tokenKey = 'calendar_access_token';
   static const String _tokenExpiryKey = 'calendar_token_expiry';
+  static const String _refreshTokenKey = 'calendar_refresh_token';
+  
+  // Store refresh token for silent token renewal
+  String? _refreshToken;
 
   // Load stored token on init
   Future<void> loadStoredToken() async {
@@ -202,20 +206,42 @@ class AuthService {
       await loadStoredToken();
     }
     
-    // Return stored access token if available
-    // We'll let the API call fail if token is truly expired rather than checking expiry here
-    // This is because the stored expiry might be inaccurate after app restart
-    if (_calendarAccessToken != null && _calendarAccessToken!.isNotEmpty) {
+    // Check if token is expired or about to expire
+    final bool isTokenExpired = _tokenExpiry == null || 
+        DateTime.now().isAfter(_tokenExpiry!.subtract(const Duration(minutes: 5)));
+    
+    // If token exists and not expired, use it
+    if (_calendarAccessToken != null && _calendarAccessToken!.isNotEmpty && !isTokenExpired) {
       if (kDebugMode) {
-        debugPrint('Using stored calendar access token');
+        debugPrint('Using stored calendar access token (valid until $_tokenExpiry)');
       }
       return _calendarAccessToken;
     }
     
+    // Token is expired or missing - try to refresh silently
+    if (kDebugMode) {
+      debugPrint('Token expired or missing, attempting silent refresh...');
+    }
+    
     try {
       if (kIsWeb) {
-        // For web, if no token available, return null
-        // Don't trigger popup automatically - only return what we have
+        // For web, try to silently re-authenticate using stored session
+        final user = _auth.currentUser;
+        if (user != null) {
+          // Try to get fresh token via Firebase Auth token refresh
+          final idToken = await user.getIdToken(true);
+          if (idToken != null) {
+            // Firebase user is still valid, try silent Google sign-in popup
+            // But we can't do silent re-auth on web without user interaction
+            // So check if we have a recent token that might still work
+            if (_calendarAccessToken != null && _calendarAccessToken!.isNotEmpty) {
+              if (kDebugMode) {
+                debugPrint('Returning possibly expired token for web - will refresh on 401');
+              }
+              return _calendarAccessToken;
+            }
+          }
+        }
         return _calendarAccessToken;
       } else {
         // Mobile: try silent sign-in to refresh token
@@ -239,6 +265,21 @@ class AuthService {
   
   // Check if calendar access is available
   bool get hasCalendarAccess => _calendarAccessToken != null && _calendarAccessToken!.isNotEmpty;
+  
+  // Check if token needs refresh (expired or about to expire)
+  bool get needsTokenRefresh {
+    if (_tokenExpiry == null) return true;
+    // Refresh if token expires in less than 5 minutes
+    return DateTime.now().isAfter(_tokenExpiry!.subtract(const Duration(minutes: 5)));
+  }
+  
+  // Mark token as invalid (called when API returns 401)
+  void invalidateToken() {
+    if (kDebugMode) {
+      debugPrint('Token invalidated - will require re-authentication');
+    }
+    _tokenExpiry = DateTime.now().subtract(const Duration(minutes: 1));
+  }
   
   // Refresh token silently without popup (for automatic calendar loading)
   Future<String?> refreshTokenSilently() async {

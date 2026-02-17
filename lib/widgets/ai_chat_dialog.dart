@@ -19,6 +19,7 @@ class _AIChatDialogState extends State<AIChatDialog> {
   List<FunctionCall>? _pendingCalls;
   bool _isLoading = false;
   bool _showApiKeyInput = false;
+  // AI 채팅 에이전트 클릭 시 autofocus 비활성화 - 키보드 자동 표시 방지
   bool _shouldAutoFocus = false;
 
   @override
@@ -28,10 +29,8 @@ class _AIChatDialogState extends State<AIChatDialog> {
     final provider = Provider.of<AppProvider>(context, listen: false);
     if (!provider.hasGeminiApiKey) {
       _showApiKeyInput = true;
-    } else {
-      // API 키가 있으면 자동으로 입력창에 포커스
-      _shouldAutoFocus = true;
     }
+    // 더 이상 자동 포커스 설정하지 않음 - 사용자가 직접 클릭해야 키보드 활성화
   }
 
   @override

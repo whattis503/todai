@@ -216,7 +216,7 @@ class _TodoItemState extends State<TodoItem> {
                           spacing: 4,
                           runSpacing: 4,
                           children: [
-                            for (final minutes in [1, 5, 10, 30])
+                            for (final minutes in [5, 10, 30, 60])
                               _buildAddTimeButton(minutes),
                             if (widget.todo.estimatedTime != null)
                               _buildClearTimeButton(),
@@ -257,6 +257,7 @@ class _TodoItemState extends State<TodoItem> {
   }
 
   Widget _buildAddTimeButton(int minutes) {
+    final displayText = minutes >= 60 ? '+${minutes ~/ 60}h' : '+${minutes}m';
     return GestureDetector(
       onTap: () {
         final current = widget.todo.estimatedTime ?? 0;
@@ -269,7 +270,7 @@ class _TodoItemState extends State<TodoItem> {
           borderRadius: BorderRadius.circular(2),
         ),
         child: Text(
-          '+${minutes}m',
+          displayText,
           style: const TextStyle(
             fontSize: 11,
             color: AppTheme.textSecondary,

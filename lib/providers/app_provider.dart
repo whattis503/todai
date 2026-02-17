@@ -447,7 +447,7 @@ class AppProvider extends ChangeNotifier {
   }
 
   // Calendar
-  Future<void> loadCalendarEvents(DateTime start, DateTime end) async {
+  Future<void> loadCalendarEvents(DateTime start, DateTime end, {bool isRetry = false}) async {
     try {
       final token = await _authService.getAccessToken();
       if (kDebugMode) {
@@ -459,6 +459,29 @@ class AppProvider extends ChangeNotifier {
           timeMin: start,
           timeMax: end,
         );
+        
+        // Check if token expired (401 error)
+        if (_calendarService.lastError == 'TOKEN_EXPIRED' && !isRetry) {
+          if (kDebugMode) {
+            debugPrint('AppProvider: Token expired, attempting re-authentication...');
+          }
+          _authService.invalidateToken();
+          
+          // Try to re-authenticate (will show popup on web)
+          final refreshSuccess = await _authService.requestCalendarAccess();
+          if (refreshSuccess) {
+            // Retry loading calendar events with new token
+            await loadCalendarEvents(start, end, isRetry: true);
+            return;
+          } else {
+            if (kDebugMode) {
+              debugPrint('AppProvider: Re-authentication failed');
+            }
+            // Clear events but don't force logout
+            _calendarEvents = [];
+          }
+        }
+        
         if (kDebugMode) {
           debugPrint('AppProvider: Loaded ${_calendarEvents.length} calendar events');
         }
