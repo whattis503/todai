@@ -714,15 +714,14 @@ class _CombinedScreenState extends State<CombinedScreen> {
   }
   
   Future<void> _changeSelectedTodosDate(BuildContext context, AppProvider provider) async {
-    final selectedDate = await showDatePicker(
+    final pickedDate = await showDatePicker(
       context: context,
       initialDate: provider.selectedDate,
       firstDate: DateTime.now().subtract(const Duration(days: 365)),
       lastDate: DateTime.now().add(const Duration(days: 365)),
-      locale: const Locale('ko', 'KR'),
     );
     
-    if (selectedDate != null) {
+    if (pickedDate != null && mounted) {
       final selectedIds = _selectedTodoIds.toList();
       int updatedCount = 0;
       
@@ -733,7 +732,7 @@ class _CombinedScreenState extends State<CombinedScreen> {
           final todoIndex = allTodos.indexWhere((t) => t.id == id);
           if (todoIndex != -1) {
             final todo = allTodos[todoIndex];
-            final updatedTodo = todo.copyWith(date: selectedDate);
+            final updatedTodo = todo.copyWith(date: pickedDate);
             await provider.updateTodo(updatedTodo);
             updatedCount++;
           }
