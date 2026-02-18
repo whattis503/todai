@@ -111,6 +111,10 @@ class _CombinedScreenState extends State<CombinedScreen> {
 
         return Column(
           children: [
+            // Calendar reconnection banner
+            if (provider.authService.needsCalendarReconnect)
+              _buildCalendarReconnectBanner(provider),
+            
             // Week view only
             _buildWeekView(provider),
             
@@ -163,6 +167,51 @@ class _CombinedScreenState extends State<CombinedScreen> {
           ],
         );
       },
+    );
+  }
+
+  Widget _buildCalendarReconnectBanner(AppProvider provider) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      color: AppTheme.accentLight,
+      child: Row(
+        children: [
+          const Icon(Icons.calendar_month, color: AppTheme.accent, size: 20),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              '캘린더 연결이 만료되었습니다',
+              style: TextStyle(
+                fontSize: 13,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              final success = await provider.authService.requestCalendarAccess();
+              if (success && mounted) {
+                await _tryLoadGoogleEvents();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('캘린더가 다시 연결되었습니다'),
+                    backgroundColor: AppTheme.accent,
+                  ),
+                );
+              }
+            },
+            style: TextButton.styleFrom(
+              backgroundColor: AppTheme.accent,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('재연결', style: TextStyle(fontSize: 12)),
+          ),
+        ],
+      ),
     );
   }
 
