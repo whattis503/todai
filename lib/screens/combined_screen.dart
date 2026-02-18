@@ -943,48 +943,9 @@ class _CombinedScreenState extends State<CombinedScreen> {
       builder: (context, candidateData, rejectedData) {
         final isHovering = candidateData.isNotEmpty;
         
-        return Draggable<String>(
-          data: todo.id,
-          onDragStarted: () => setState(() {}),
-          onDragEnd: (_) => setState(() {
-            _dropTargetIndex = null;
-            _dropAsChild = false;
-          }),
-          feedback: Material(
-            elevation: 4,
-            borderRadius: BorderRadius.circular(8),
-            child: Container(
-              width: MediaQuery.of(context).size.width * 0.9,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppTheme.background,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppTheme.accent, width: 2),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.drag_indicator, color: AppTheme.accent, size: 20),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      todo.text,
-                      style: const TextStyle(fontSize: 14, color: AppTheme.textPrimary),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          childWhenDragging: Opacity(
-            opacity: 0.3,
-            child: _buildTodoItemContent(context, provider, todo, indentLevel, false, false),
-          ),
-          child: _buildTodoItemContent(
-            context, provider, todo, indentLevel,
-            isHovering, _dropAsChild && isDropTarget,
-          ),
+        return _buildTodoItemContent(
+          context, provider, todo, indentLevel,
+          isHovering, _dropAsChild && isDropTarget,
         );
       },
     );
@@ -1037,10 +998,50 @@ class _CombinedScreenState extends State<CombinedScreen> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Drag Handle
-            const Padding(
-              padding: EdgeInsets.only(top: 2),
-              child: Icon(Icons.drag_indicator, size: 20, color: AppTheme.textTertiary),
+            // Drag Handle - Only this part is draggable for reordering
+            Draggable<String>(
+              data: todo.id,
+              axis: Axis.vertical,
+              onDragStarted: () => setState(() {}),
+              onDragEnd: (_) => setState(() {
+                _dropTargetIndex = null;
+                _dropAsChild = false;
+              }),
+              feedback: Material(
+                elevation: 4,
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  width: MediaQuery.of(context).size.width * 0.9,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.background,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppTheme.accent, width: 2),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.drag_indicator, color: AppTheme.accent, size: 20),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          todo.text,
+                          style: const TextStyle(fontSize: 14, color: AppTheme.textPrimary),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              childWhenDragging: const Padding(
+                padding: EdgeInsets.only(top: 2),
+                child: Icon(Icons.drag_indicator, size: 20, color: AppTheme.accent),
+              ),
+              child: const Padding(
+                padding: EdgeInsets.only(top: 2),
+                child: Icon(Icons.drag_indicator, size: 20, color: AppTheme.textTertiary),
+              ),
             ),
             const SizedBox(width: 4),
             

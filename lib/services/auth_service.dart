@@ -22,16 +22,10 @@ class AuthService {
   String? _lastError;
   String? get lastError => _lastError;
   
-  // Store access token from OAuth for Calendar API
+  // Store access token from OAuth for Calendar API (stored permanently)
   String? _calendarAccessToken;
-  DateTime? _tokenExpiry;
   
   static const String _tokenKey = 'calendar_access_token';
-  static const String _tokenExpiryKey = 'calendar_token_expiry';
-  static const String _refreshTokenKey = 'calendar_refresh_token';
-  
-  // Store refresh token for silent token renewal
-  String? _refreshToken;
 
   // Load stored token on init
   Future<void> loadStoredToken() async {
@@ -39,18 +33,10 @@ class AuthService {
       if (kIsWeb) {
         // Web: use localStorage directly
         _calendarAccessToken = web_storage.getItem(_tokenKey);
-        final expiryStr = web_storage.getItem(_tokenExpiryKey);
-        if (expiryStr != null) {
-          _tokenExpiry = DateTime.fromMillisecondsSinceEpoch(int.parse(expiryStr));
-        }
       } else {
         // Mobile: use SharedPreferences
         final prefs = await SharedPreferences.getInstance();
         _calendarAccessToken = prefs.getString(_tokenKey);
-        final expiryMs = prefs.getInt(_tokenExpiryKey);
-        if (expiryMs != null) {
-          _tokenExpiry = DateTime.fromMillisecondsSinceEpoch(expiryMs);
-        }
       }
       if (kDebugMode) {
         debugPrint('Loaded stored calendar token: ${_calendarAccessToken != null}, length: ${_calendarAccessToken?.length ?? 0}');
@@ -62,7 +48,7 @@ class AuthService {
     }
   }
   
-  // Save token to storage
+  // Save token to storage (permanent)
   Future<void> _saveToken() async {
     try {
       if (kIsWeb) {
@@ -70,20 +56,14 @@ class AuthService {
         if (_calendarAccessToken != null) {
           web_storage.setItem(_tokenKey, _calendarAccessToken!);
         }
-        if (_tokenExpiry != null) {
-          web_storage.setItem(_tokenExpiryKey, _tokenExpiry!.millisecondsSinceEpoch.toString());
-        }
         if (kDebugMode) {
-          debugPrint('Saved calendar token to localStorage');
+          debugPrint('Saved calendar token to localStorage (permanent)');
         }
       } else {
         // Mobile: use SharedPreferences
         final prefs = await SharedPreferences.getInstance();
         if (_calendarAccessToken != null) {
           await prefs.setString(_tokenKey, _calendarAccessToken!);
-        }
-        if (_tokenExpiry != null) {
-          await prefs.setInt(_tokenExpiryKey, _tokenExpiry!.millisecondsSinceEpoch);
         }
       }
     } catch (e) {
@@ -99,12 +79,10 @@ class AuthService {
       if (kIsWeb) {
         // Web: use localStorage directly
         web_storage.removeItem(_tokenKey);
-        web_storage.removeItem(_tokenExpiryKey);
       } else {
         // Mobile: use SharedPreferences
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove(_tokenKey);
-        await prefs.remove(_tokenExpiryKey);
       }
     } catch (e) {
       if (kDebugMode) {
@@ -130,13 +108,10 @@ class AuthService {
         final UserCredential userCredential = 
             await _auth.signInWithPopup(googleProvider);
         
-        // Store OAuth access token for Calendar API
+        // Store OAuth access token for Calendar API permanently
         final credential = userCredential.credential;
         if (credential != null) {
           _calendarAccessToken = credential.accessToken;
-          // Set token expiry to 50 minutes from now (Google tokens expire in 60 min)
-          // We'll try to refresh before expiry
-          _tokenExpiry = DateTime.now().add(const Duration(minutes: 50));
           await _saveToken();
           
           if (kDebugMode) {
@@ -158,9 +133,8 @@ class AuthService {
         final GoogleSignInAuthentication googleAuth = 
             await googleUser.authentication;
 
-        // Store access token for Calendar API
+        // Store access token for Calendar API permanently
         _calendarAccessToken = googleAuth.accessToken;
-        _tokenExpiry = DateTime.now().add(const Duration(minutes: 50));
         await _saveToken();
 
         final credential = GoogleAuthProvider.credential(
@@ -189,7 +163,6 @@ class AuthService {
 
   Future<void> signOut() async {
     _calendarAccessToken = null;
-    _tokenExpiry = null;
     await _clearStoredToken();
     try {
       await _googleSignIn.signOut();
@@ -207,9 +180,7 @@ class AuthService {
       await loadStoredToken();
     }
     
-    // For web: always return cached token if available
-    // The actual validity will be checked when making API calls
-    // If 401 is returned, requestCalendarAccess() will be called
+    // Return cached token if available (no expiry check - will be validated by API)
     if (_calendarAccessToken != null && _calendarAccessToken!.isNotEmpty) {
       if (kDebugMode) {
         debugPrint('Using stored calendar access token');
@@ -229,7 +200,6 @@ class AuthService {
         if (googleUser != null) {
           final auth = await googleUser.authentication;
           _calendarAccessToken = auth.accessToken;
-          _tokenExpiry = DateTime.now().add(const Duration(minutes: 50));
           await _saveToken();
           return auth.accessToken;
         }
@@ -246,19 +216,13 @@ class AuthService {
   // Check if calendar access is available
   bool get hasCalendarAccess => _calendarAccessToken != null && _calendarAccessToken!.isNotEmpty;
   
-  // Check if token needs refresh (expired or about to expire)
-  bool get needsTokenRefresh {
-    if (_tokenExpiry == null) return true;
-    // Refresh if token expires in less than 5 minutes
-    return DateTime.now().isAfter(_tokenExpiry!.subtract(const Duration(minutes: 5)));
-  }
-  
   // Mark token as invalid (called when API returns 401)
   void invalidateToken() {
     if (kDebugMode) {
       debugPrint('Token invalidated - will require re-authentication');
     }
-    _tokenExpiry = DateTime.now().subtract(const Duration(minutes: 1));
+    _calendarAccessToken = null;
+    _clearStoredToken();
   }
   
   // Refresh token silently without popup (for automatic calendar loading)
@@ -292,7 +256,6 @@ class AuthService {
             final silentResult = await user.reauthenticateWithPopup(googleProviderSilent);
             if (silentResult.credential != null && silentResult.credential!.accessToken != null) {
               _calendarAccessToken = silentResult.credential!.accessToken;
-              _tokenExpiry = DateTime.now().add(const Duration(minutes: 50));
               await _saveToken();
               if (kDebugMode) {
                 debugPrint('Calendar token refreshed silently');
@@ -317,7 +280,6 @@ class AuthService {
           final result = await user.reauthenticateWithPopup(googleProvider);
           if (result.credential != null && result.credential!.accessToken != null) {
             _calendarAccessToken = result.credential!.accessToken;
-            _tokenExpiry = DateTime.now().add(const Duration(minutes: 50));
             await _saveToken();
             if (kDebugMode) {
               debugPrint('Calendar access granted with popup');
@@ -331,7 +293,6 @@ class AuthService {
         if (googleUser != null) {
           final auth = await googleUser.authentication;
           _calendarAccessToken = auth.accessToken;
-          _tokenExpiry = DateTime.now().add(const Duration(minutes: 50));
           await _saveToken();
           return true;
         }
@@ -362,7 +323,6 @@ class AuthService {
         
         if (userCredential.credential != null) {
           _calendarAccessToken = userCredential.credential!.accessToken;
-          _tokenExpiry = DateTime.now().add(const Duration(minutes: 50));
           await _saveToken();
           return true;
         }
