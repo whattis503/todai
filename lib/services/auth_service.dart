@@ -58,12 +58,16 @@ class AuthService {
         }
       }
       
-      // Check if token is expired and try to refresh automatically
+      // Check if token is expired
       if (_calendarAccessToken != null && _isTokenExpired()) {
         if (kDebugMode) {
-          debugPrint('Token expired, attempting automatic refresh...');
+          debugPrint('Token expired, setting reconnect flag...');
         }
-        await _tryAutoRefreshToken();
+        _needsCalendarReconnect = true;
+        // Clear expired token
+        _calendarAccessToken = null;
+        _tokenExpiry = null;
+        await _clearStoredToken();
       }
     } catch (e) {
       if (kDebugMode) {
@@ -76,58 +80,6 @@ class AuthService {
   bool _isTokenExpired() {
     if (_tokenExpiry == null) return true;
     return DateTime.now().isAfter(_tokenExpiry!.subtract(const Duration(minutes: 5)));
-  }
-  
-  // Try to automatically refresh token using Firebase Auth
-  Future<bool> _tryAutoRefreshToken() async {
-    if (!kIsWeb) {
-      // Mobile: Use GoogleSignIn silent refresh
-      try {
-        final googleUser = await _googleSignIn.signInSilently();
-        if (googleUser != null) {
-          final auth = await googleUser.authentication;
-          if (auth.accessToken != null) {
-            _calendarAccessToken = auth.accessToken;
-            _tokenExpiry = DateTime.now().add(const Duration(minutes: 55));
-            await _saveToken();
-            _needsCalendarReconnect = false;
-            if (kDebugMode) {
-              debugPrint('Mobile: Token auto-refreshed successfully');
-            }
-            return true;
-          }
-        }
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('Mobile auto-refresh failed: $e');
-        }
-      }
-    } else {
-      // Web: Try to get token from Firebase Auth's current user
-      try {
-        final user = _auth.currentUser;
-        if (user != null) {
-          // Force refresh the ID token - this doesn't give us a new access token
-          // but confirms the user is still authenticated
-          await user.getIdToken(true);
-          
-          // Unfortunately, on web we can't get a new access token without user interaction
-          // Set flag to show reconnect button
-          _needsCalendarReconnect = true;
-          if (kDebugMode) {
-            debugPrint('Web: Token expired, needs manual reconnection');
-          }
-          return false;
-        }
-      } catch (e) {
-        if (kDebugMode) {
-          debugPrint('Web auth check failed: $e');
-        }
-      }
-    }
-    
-    _needsCalendarReconnect = true;
-    return false;
   }
   
   // Save token to storage with expiry
@@ -266,15 +218,13 @@ class AuthService {
     // Check if token is expired
     if (_calendarAccessToken != null && _isTokenExpired()) {
       if (kDebugMode) {
-        debugPrint('Token expired during getAccessToken, trying refresh...');
+        debugPrint('Token expired during getAccessToken');
       }
-      
-      // Try to auto-refresh
-      final refreshed = await _tryAutoRefreshToken();
-      if (!refreshed) {
-        // Token couldn't be refreshed, return null to trigger reconnection UI
-        return null;
-      }
+      _needsCalendarReconnect = true;
+      _calendarAccessToken = null;
+      _tokenExpiry = null;
+      await _clearStoredToken();
+      return null;
     }
     
     // Return cached token if available and valid
@@ -302,32 +252,35 @@ class AuthService {
     _clearStoredToken();
   }
   
-  // Request fresh calendar token (shows popup on web)
+  // Request fresh calendar token - uses full sign-in flow for iOS PWA compatibility
+  // iOS PWA doesn't support popups, so we do a full sign-in
   Future<bool> requestCalendarAccess() async {
     try {
       if (kIsWeb) {
-        final user = _auth.currentUser;
-        if (user != null) {
-          // Show consent popup to get new token
-          GoogleAuthProvider googleProvider = GoogleAuthProvider();
-          googleProvider.addScope('https://www.googleapis.com/auth/calendar');
-          googleProvider.addScope('https://www.googleapis.com/auth/calendar.events');
-          googleProvider.addScope('https://www.googleapis.com/auth/calendar.readonly');
-          googleProvider.setCustomParameters({
-            'prompt': 'consent',
-          });
-          
-          final result = await user.reauthenticateWithPopup(googleProvider);
-          if (result.credential != null && result.credential!.accessToken != null) {
-            _calendarAccessToken = result.credential!.accessToken;
-            _tokenExpiry = DateTime.now().add(const Duration(minutes: 55));
-            _needsCalendarReconnect = false;
-            await _saveToken();
-            if (kDebugMode) {
-              debugPrint('Calendar access renewed successfully');
-            }
-            return true;
+        // For web (including iOS PWA), do a full sign-in with popup
+        // This works better than reauthenticateWithPopup on iOS PWA
+        GoogleAuthProvider googleProvider = GoogleAuthProvider();
+        googleProvider.addScope('https://www.googleapis.com/auth/calendar');
+        googleProvider.addScope('https://www.googleapis.com/auth/calendar.events');
+        googleProvider.addScope('https://www.googleapis.com/auth/calendar.readonly');
+        googleProvider.setCustomParameters({
+          'prompt': 'consent',
+          'access_type': 'offline',
+        });
+        
+        final UserCredential userCredential = 
+            await _auth.signInWithPopup(googleProvider);
+        
+        if (userCredential.credential != null && 
+            userCredential.credential!.accessToken != null) {
+          _calendarAccessToken = userCredential.credential!.accessToken;
+          _tokenExpiry = DateTime.now().add(const Duration(minutes: 55));
+          _needsCalendarReconnect = false;
+          await _saveToken();
+          if (kDebugMode) {
+            debugPrint('Calendar access renewed via full sign-in');
           }
+          return true;
         }
       } else {
         // Mobile: try full sign-in again
@@ -350,7 +303,7 @@ class AuthService {
     return false;
   }
   
-  // Force re-authenticate
+  // Force re-authenticate - same as requestCalendarAccess but with account selection
   Future<bool> forceReauthenticate() async {
     try {
       if (kIsWeb) {
