@@ -246,6 +246,7 @@ class AppProvider extends ChangeNotifier {
     required String text,
     int? estimatedTime,
     String? parentId,
+    DateTime? date,
   }) async {
     if (kDebugMode) {
       debugPrint('AppProvider: Creating todo "$text"');
@@ -257,7 +258,7 @@ class AppProvider extends ChangeNotifier {
     
     await _firestoreService.createTodo(
       text: text,
-      date: _selectedDate,
+      date: date ?? _selectedDate,
       estimatedTime: estimatedTime,
       parentId: parentId,
       order: maxOrder,

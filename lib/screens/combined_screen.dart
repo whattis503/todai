@@ -108,6 +108,8 @@ class _CombinedScreenState extends State<CombinedScreen> {
         
         // Calculate total estimated time
         final totalEstimatedMinutes = todos.fold<int>(0, (sum, todo) => sum + (todo.estimatedTime ?? 0));
+        // Calculate total actual time
+        final totalActualMinutes = todos.fold<int>(0, (sum, todo) => sum + (todo.actualTime ?? 0));
 
         return Column(
           children: [
@@ -147,6 +149,7 @@ class _CombinedScreenState extends State<CombinedScreen> {
                     count: todos.length,
                     color: AppTheme.textSecondary,
                     totalMinutes: totalEstimatedMinutes,
+                    totalActualMinutes: totalActualMinutes,
                   ),
                   
                   // Multi-select action bar
@@ -595,6 +598,7 @@ class _CombinedScreenState extends State<CombinedScreen> {
     required int count,
     required Color color,
     int? totalMinutes,
+    int? totalActualMinutes,
   }) {
     // Format total time
     String formatTotalTime(int minutes) {
@@ -671,6 +675,33 @@ class _CombinedScreenState extends State<CombinedScreen> {
               ),
             ),
           ],
+          // Total actual time
+          if (totalActualMinutes != null && totalActualMinutes > 0) ...[  
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppTheme.textTertiary.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.timer_outlined, size: 11, color: AppTheme.textSecondary),
+                  const SizedBox(width: 4),
+                  Text(
+                    formatTotalTime(totalActualMinutes),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -723,9 +754,19 @@ class _CombinedScreenState extends State<CombinedScreen> {
           TextButton.icon(
             onPressed: () => _changeSelectedTodosDate(context, provider),
             icon: const Icon(Icons.calendar_today, size: 16),
-            label: const Text('날짜'),
+            label: const Text('이동'),
             style: TextButton.styleFrom(
               foregroundColor: Colors.blue,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+            ),
+          ),
+          // Copy to date button
+          TextButton.icon(
+            onPressed: () => _copySelectedTodosToDate(context, provider),
+            icon: const Icon(Icons.copy, size: 16),
+            label: const Text('복제'),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.orange,
               padding: const EdgeInsets.symmetric(horizontal: 8),
             ),
           ),
@@ -797,6 +838,53 @@ class _CombinedScreenState extends State<CombinedScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('$updatedCount개 할 일의 날짜가 변경되었습니다'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+  
+  Future<void> _copySelectedTodosToDate(BuildContext context, AppProvider provider) async {
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: provider.selectedDate,
+      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    
+    if (pickedDate != null && mounted) {
+      final selectedIds = _selectedTodoIds.toList();
+      int copiedCount = 0;
+      
+      for (final id in selectedIds) {
+        try {
+          // Find todo from organizedTodos
+          final allTodos = provider.organizedTodos;
+          final todoIndex = allTodos.indexWhere((t) => t.id == id);
+          if (todoIndex != -1) {
+            final todo = allTodos[todoIndex];
+            // Create a new todo with the same content but different date
+            await provider.createTodo(
+              text: todo.text,
+              estimatedTime: todo.estimatedTime,
+              date: pickedDate,
+            );
+            copiedCount++;
+          }
+        } catch (e) {
+          // Skip if error
+          continue;
+        }
+      }
+      
+      _clearSelection();
+      
+      if (mounted && copiedCount > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$copiedCount개 할 일이 복제되었습니다'),
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 2),
           ),
