@@ -83,42 +83,67 @@
   </div>
   
   <script>
-    // Prevent iOS Safari edge swipe navigation
+    // Aggressive iOS Safari/PWA swipe back prevention
     (function() {
-      // Block horizontal swipe at edges
       var startX = 0;
       var startY = 0;
+      var isEdgeSwipe = false;
       
+      // Prevent touchstart at edges
       document.addEventListener('touchstart', function(e) {
         startX = e.touches[0].clientX;
         startY = e.touches[0].clientY;
+        var screenWidth = window.innerWidth;
+        
+        // Mark if starting from edge (expanded to 50px for better coverage)
+        isEdgeSwipe = (startX < 50 || startX > screenWidth - 50);
       }, { passive: true });
       
+      // Prevent touchmove for edge swipes
       document.addEventListener('touchmove', function(e) {
+        if (!isEdgeSwipe) return;
+        
         var deltaX = e.touches[0].clientX - startX;
         var deltaY = e.touches[0].clientY - startY;
         
-        // If horizontal swipe from left edge (within 30px)
-        if (startX < 30 && deltaX > 10 && Math.abs(deltaX) > Math.abs(deltaY)) {
-          e.preventDefault();
-          e.stopPropagation();
-          return false;
-        }
-        
-        // If horizontal swipe from right edge
-        var screenWidth = window.innerWidth;
-        if (startX > screenWidth - 30 && deltaX < -10 && Math.abs(deltaX) > Math.abs(deltaY)) {
+        // Block horizontal swipe from edges
+        if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 5) {
           e.preventDefault();
           e.stopPropagation();
           return false;
         }
       }, { passive: false });
       
-      // Disable browser history navigation
-      history.pushState(null, '', location.href);
-      window.addEventListener('popstate', function() {
-        history.pushState(null, '', location.href);
+      document.addEventListener('touchend', function() {
+        isEdgeSwipe = false;
+      }, { passive: true });
+      
+      // Aggressive history manipulation to prevent back navigation
+      // Push multiple history states to create a buffer
+      for (var i = 0; i < 3; i++) {
+        history.pushState({ page: i }, '', location.href);
+      }
+      
+      window.addEventListener('popstate', function(e) {
+        // Always push back to prevent going to loading screen
+        history.pushState({ page: 'app' }, '', location.href);
       });
+      
+      // Also intercept beforeunload as additional protection
+      window.addEventListener('beforeunload', function(e) {
+        // Push state before potential navigation
+        history.pushState({ page: 'app' }, '', location.href);
+      });
+      
+      // Prevent gesture navigation via navigation API if available
+      if ('navigation' in window) {
+        window.navigation.addEventListener('navigate', function(e) {
+          // Block back/forward navigation
+          if (e.navigationType === 'traverse') {
+            e.preventDefault();
+          }
+        });
+      }
     })();
     
     window.addEventListener('flutter-first-frame', function() {
