@@ -68,9 +68,10 @@ class FirestoreService {
               .whereType<TodoModel>()
               .toList();
           
-          // Filter by date in memory
+          // Filter by date in memory (exclude memos - items without date)
           final todosForDate = allTodos.where((todo) {
-            final todoDate = DateTime(todo.date.year, todo.date.month, todo.date.day);
+            if (todo.date == null) return false; // 메모는 제외
+            final todoDate = DateTime(todo.date!.year, todo.date!.month, todo.date!.day);
             return todoDate.isAtSameMomentAs(startOfDay);
           }).toList();
           
@@ -89,9 +90,85 @@ class FirestoreService {
         });
   }
 
+  // 메모 가져오기 (날짜가 없는 할일들)
+  Stream<List<TodoModel>> getMemos() {
+    if (kDebugMode) {
+      debugPrint('FirestoreService: Getting memos (todos without date)');
+    }
+    
+    final collection = _todosCollection;
+    if (collection == null) {
+      return Stream.value(<TodoModel>[]);
+    }
+    
+    return collection
+        .snapshots()
+        .map((snapshot) {
+          final memos = snapshot.docs
+              .map((doc) {
+                try {
+                  return TodoModel.fromFirestore(doc.data(), doc.id);
+                } catch (e) {
+                  return null;
+                }
+              })
+              .whereType<TodoModel>()
+              .where((todo) => todo.date == null) // 날짜가 없는 것만 (메모)
+              .toList();
+          
+          if (kDebugMode) {
+            debugPrint('FirestoreService: Found ${memos.length} memos');
+          }
+          
+          memos.sort((a, b) => a.order.compareTo(b.order));
+          return memos;
+        })
+        .handleError((error) {
+          if (kDebugMode) {
+            debugPrint('FirestoreService: Memos stream error: $error');
+          }
+          return <TodoModel>[];
+        });
+  }
+  
+  // 메모 생성 (날짜 없는 할일)
+  Future<TodoModel> createMemo({
+    required String text,
+    int? estimatedTime,
+    int order = 0,
+  }) async {
+    final collection = _todosCollection;
+    if (collection == null) {
+      throw Exception('User not logged in');
+    }
+    final docRef = collection.doc();
+    final now = DateTime.now();
+    
+    if (kDebugMode) {
+      debugPrint('FirestoreService: Creating memo "$text"');
+    }
+    
+    final memo = TodoModel(
+      id: docRef.id,
+      text: text,
+      createdAt: now,
+      date: null, // 메모는 날짜가 없음
+      estimatedTime: estimatedTime,
+      order: order,
+    );
+    
+    await docRef.set(memo.toFirestore());
+    
+    if (kDebugMode) {
+      debugPrint('FirestoreService: Memo created with ID ${docRef.id}');
+    }
+    
+    return memo;
+  }
+
   Future<TodoModel> createTodo({
     required String text,
-    required DateTime date,
+    DateTime? date, // nullable로 변경
     int? estimatedTime,
     String? parentId,
     int order = 0,
@@ -102,7 +179,7 @@ class FirestoreService {
     }
     final docRef = collection.doc();
     final now = DateTime.now();
-    final todoDate = DateTime(date.year, date.month, date.day);
+    final todoDate = date != null ? DateTime(date.year, date.month, date.day) : null;
     
     if (kDebugMode) {
       debugPrint('FirestoreService: Creating todo "$text" for date $todoDate');
@@ -112,7 +189,7 @@ class FirestoreService {
       id: docRef.id,
       text: text,
       createdAt: now,
-      date: todoDate,
+      date: todoDate, // nullable
       estimatedTime: estimatedTime,
       parentId: parentId,
       order: order,
@@ -307,7 +384,8 @@ class FirestoreService {
       final existingTexts = existingTodosSnapshot.docs
           .map((doc) => TodoModel.fromFirestore(doc.data(), doc.id))
           .where((todo) {
-            final todoDate = DateTime(todo.date.year, todo.date.month, todo.date.day);
+            if (todo.date == null) return false; // 메모 제외
+            final todoDate = DateTime(todo.date!.year, todo.date!.month, todo.date!.day);
             return todoDate.isAtSameMomentAs(startOfDay);
           })
           .map((todo) => todo.text)

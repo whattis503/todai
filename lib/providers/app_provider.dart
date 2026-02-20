@@ -19,6 +19,7 @@ class AppProvider extends ChangeNotifier {
 
   User? _user;
   List<TodoModel> _todos = [];
+  List<TodoModel> _memos = []; // 메모 (날짜 없는 할일)
   List<RoutineModel> _routines = [];
   List<CalendarEvent> _calendarEvents = [];
   DateTime _selectedDate = DateTime.now();
@@ -26,11 +27,13 @@ class AppProvider extends ChangeNotifier {
   String? _error;
   
   StreamSubscription<List<TodoModel>>? _todosSubscription;
+  StreamSubscription<List<TodoModel>>? _memosSubscription; // 메모 구독
   StreamSubscription<List<RoutineModel>>? _routinesSubscription;
 
   // Getters
   User? get user => _user;
   List<TodoModel> get todos => _todos;
+  List<TodoModel> get memos => _memos; // 메모 getter
   List<RoutineModel> get routines => _routines;
   List<CalendarEvent> get calendarEvents => _calendarEvents;
   DateTime get selectedDate => _selectedDate;
@@ -125,6 +128,7 @@ class AppProvider extends ChangeNotifier {
           try {
             _firestoreService.setUserId(user.uid);
             _loadTodos();
+            _loadMemos(); // 메모 로드
             _loadRoutines();
             
             try {
@@ -153,9 +157,11 @@ class AppProvider extends ChangeNotifier {
           }
         } else {
           _todos = [];
+          _memos = []; // 메모 초기화
           _routines = [];
           _calendarEvents = [];
           _todosSubscription?.cancel();
+          _memosSubscription?.cancel(); // 메모 구독 취소
           _routinesSubscription?.cancel();
         }
         notifyListeners();
@@ -240,6 +246,61 @@ class AppProvider extends ChangeNotifier {
             notifyListeners();
           },
         );
+  }
+
+  // \uba54\ubaa8 \ub85c\ub4dc
+  void _loadMemos() {
+    if (kDebugMode) {
+      debugPrint('AppProvider: Loading memos');
+    }
+    
+    _memosSubscription?.cancel();
+    _memosSubscription = _firestoreService
+        .getMemos()
+        .listen(
+          (memos) {
+            if (kDebugMode) {
+              debugPrint('AppProvider: Received ${memos.length} memos');
+            }
+            _memos = memos;
+            notifyListeners();
+          },
+          onError: (error) {
+            if (kDebugMode) {
+              debugPrint('AppProvider: Memo stream error: $error');
+            }
+          },
+        );
+  }
+
+  // \uba54\ubaa8 \uc0dd\uc131
+  Future<void> createMemo({
+    required String text,
+    int? estimatedTime,
+  }) async {
+    if (kDebugMode) {
+      debugPrint('AppProvider: Creating memo "$text"');
+    }
+    
+    final maxOrder = _memos.isEmpty 
+        ? 0 
+        : _memos.map((m) => m.order).reduce((a, b) => a > b ? a : b) + 1;
+    
+    await _firestoreService.createMemo(
+      text: text,
+      estimatedTime: estimatedTime,
+      order: maxOrder,
+    );
+  }
+  
+  // \uba54\ubaa8\ub97c \ud560\uc77c\ub85c \ubcc0\ud658 (\ub0a0\uc9dc \ud560\ub2f9)
+  Future<void> assignDateToMemo(TodoModel memo, DateTime date) async {
+    if (kDebugMode) {
+      debugPrint('AppProvider: Assigning date $date to memo "${memo.text}"');
+    }
+    
+    final updatedTodo = memo.copyWith(date: date);
+    await _firestoreService.updateTodo(updatedTodo);
   }
 
   Future<void> createTodo({
@@ -928,6 +989,7 @@ class AppProvider extends ChangeNotifier {
   @override
   void dispose() {
     _todosSubscription?.cancel();
+    _memosSubscription?.cancel();
     _routinesSubscription?.cancel();
     super.dispose();
   }

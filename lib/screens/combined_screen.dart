@@ -37,6 +37,12 @@ class _CombinedScreenState extends State<CombinedScreen> {
   // Multi-select mode
   Set<String> _selectedTodoIds = {};
   bool get _isMultiSelectMode => _selectedTodoIds.isNotEmpty;
+  
+  // Memo input
+  final TextEditingController _newMemoController = TextEditingController();
+  final FocusNode _newMemoFocus = FocusNode();
+  bool _isAddingMemo = false;
+  bool _isSubmittingMemo = false;
 
   @override
   void initState() {
@@ -72,6 +78,8 @@ class _CombinedScreenState extends State<CombinedScreen> {
     _editController.dispose();
     _editFocus.dispose();
     _weekScrollController.dispose();
+    _newMemoController.dispose();
+    _newMemoFocus.dispose();
     super.dispose();
   }
 
@@ -164,6 +172,25 @@ class _CombinedScreenState extends State<CombinedScreen> {
                   if (_isAddingTodo) _buildNewTodoInput(provider),
                   
                   _buildAddTodoButton(),
+                  
+                  // === MEMO SECTION (날짜 없는 할일 - 항상 표시) ===
+                  const SizedBox(height: 16),
+                  _buildSectionHeader(
+                    icon: Icons.sticky_note_2_outlined,
+                    title: '메모',
+                    count: provider.memos.length,
+                    color: Colors.orange,
+                  ),
+                  
+                  // Memos
+                  if (provider.memos.isEmpty && !_isAddingMemo)
+                    _buildEmptySectionMessage('날짜 없이 기록할 메모를 추가하세요.')
+                  else
+                    ...provider.memos.map((memo) => _buildMemoItem(context, provider, memo)),
+                  
+                  if (_isAddingMemo) _buildNewMemoInput(provider),
+                  
+                  _buildAddMemoButton(),
                 ],
               ),
             ),
@@ -1917,5 +1944,369 @@ class _CombinedScreenState extends State<CombinedScreen> {
         ),
       ),
     );
+  }
+  
+  // ============ MEMO WIDGETS ============
+  
+  Widget _buildMemoItem(BuildContext context, AppProvider provider, TodoModel memo) {
+    final isEditing = _editingTodoId == memo.id;
+    final isSelected = _selectedTodoIds.contains(memo.id);
+    
+    if (isEditing) {
+      return _buildInlineMemoEditItem(provider, memo);
+    }
+    
+    return GestureDetector(
+      onTap: () {
+        if (_isMultiSelectMode) {
+          _toggleTodoSelection(memo.id);
+        } else {
+          _startInlineEdit(memo);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.orange.withValues(alpha: 0.1) : Colors.transparent,
+          border: Border(
+            bottom: const BorderSide(color: AppTheme.divider, width: 0.5),
+            left: isSelected
+                ? const BorderSide(color: Colors.orange, width: 3)
+                : BorderSide.none,
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Checkbox for multi-select
+            GestureDetector(
+              onTap: () => _toggleTodoSelection(memo.id),
+              child: Container(
+                width: 22,
+                height: 22,
+                margin: const EdgeInsets.only(top: 2),
+                decoration: BoxDecoration(
+                  color: isSelected 
+                      ? Colors.orange 
+                      : memo.completed 
+                          ? AppTheme.textTertiary 
+                          : Colors.transparent,
+                  border: Border.all(
+                    color: isSelected 
+                        ? Colors.orange 
+                        : memo.completed 
+                            ? AppTheme.textTertiary 
+                            : Colors.orange.withValues(alpha: 0.5),
+                    width: 1.5,
+                  ),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: isSelected
+                    ? const Icon(Icons.check, size: 16, color: Colors.white)
+                    : memo.completed
+                        ? const Icon(Icons.check, size: 16, color: Colors.white)
+                        : null,
+              ),
+            ),
+            const SizedBox(width: 12),
+            
+            // Content
+            Expanded(
+              child: Text(
+                memo.text.isEmpty ? '메모 없음' : memo.text,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: memo.completed ? AppTheme.textTertiary : AppTheme.textPrimary,
+                  decoration: memo.completed ? TextDecoration.lineThrough : null,
+                ),
+              ),
+            ),
+            
+            // Actions
+            if (!_isMultiSelectMode) ...[
+              // Assign date button (날짜 할당)
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, size: 20, color: AppTheme.textTertiary),
+                padding: EdgeInsets.zero,
+                onSelected: (value) => _handleMemoAction(context, provider, memo, value),
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'assignDate',
+                    child: Row(
+                      children: [
+                        Icon(Icons.calendar_today, size: 18, color: Colors.blue),
+                        SizedBox(width: 8),
+                        Text('날짜 할당'),
+                      ],
+                    ),
+                  ),
+                  if (!memo.completed)
+                    const PopupMenuItem(
+                      value: 'complete',
+                      child: Row(
+                        children: [
+                          Icon(Icons.check_circle, size: 18, color: Colors.green),
+                          SizedBox(width: 8),
+                          Text('완료하기'),
+                        ],
+                      ),
+                    ),
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete_outline, size: 18, color: AppTheme.error),
+                        SizedBox(width: 8),
+                        Text('삭제'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildInlineMemoEditItem(AppProvider provider, TodoModel memo) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.05),
+        border: const Border(
+          bottom: BorderSide(color: AppTheme.divider, width: 0.5),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 22,
+            height: 22,
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.orange, width: 1.5),
+              borderRadius: BorderRadius.circular(6),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextField(
+              controller: _editController,
+              focusNode: _editFocus,
+              autofocus: true,
+              style: const TextStyle(fontSize: 16, color: AppTheme.textPrimary),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+              onSubmitted: (_) => _saveInlineEdit(provider, memo),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.check, color: Colors.orange),
+            onPressed: () => _saveInlineEdit(provider, memo),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, color: AppTheme.textTertiary),
+            onPressed: _cancelInlineEdit,
+          ),
+        ],
+      ),
+    );
+  }
+  
+  void _handleMemoAction(BuildContext context, AppProvider provider, TodoModel memo, String action) {
+    switch (action) {
+      case 'assignDate':
+        _showAssignDateDialog(context, provider, memo);
+        break;
+      case 'complete':
+        provider.toggleTodoComplete(memo);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('메모 완료'),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 1),
+          ),
+        );
+        break;
+      case 'delete':
+        provider.deleteTodo(memo.id);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('메모 삭제됨'),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 1),
+          ),
+        );
+        break;
+    }
+  }
+  
+  void _showAssignDateDialog(BuildContext context, AppProvider provider, TodoModel memo) async {
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: provider.selectedDate,
+      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      locale: const Locale('ko'),
+    );
+    
+    if (pickedDate != null && mounted) {
+      await provider.assignDateToMemo(memo, pickedDate);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('메모가 ${pickedDate.month}/${pickedDate.day} 할 일로 이동되었습니다'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+  
+  Widget _buildNewMemoInput(AppProvider provider) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.05),
+        border: const Border(
+          bottom: BorderSide(color: AppTheme.divider, width: 0.5),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 22,
+            height: 22,
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.orange, width: 1.5),
+              borderRadius: BorderRadius.circular(6),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextField(
+              controller: _newMemoController,
+              focusNode: _newMemoFocus,
+              autofocus: true,
+              enabled: !_isSubmittingMemo,
+              style: const TextStyle(fontSize: 16, color: AppTheme.textPrimary),
+              decoration: InputDecoration(
+                hintText: _isSubmittingMemo ? '생성 중...' : '메모를 입력하세요',
+                hintStyle: const TextStyle(color: AppTheme.textTertiary),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+              onSubmitted: (text) => _submitNewMemo(provider, text),
+            ),
+          ),
+          if (_isSubmittingMemo)
+            const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange),
+            )
+          else ...[
+            IconButton(
+              icon: const Icon(Icons.check, size: 22),
+              color: Colors.orange,
+              onPressed: () => _submitNewMemo(provider, _newMemoController.text),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close, size: 20),
+              color: AppTheme.textTertiary,
+              onPressed: _cancelAddingMemo,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildAddMemoButton() {
+    return InkWell(
+      onTap: _startAddingMemo,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        child: Row(
+          children: [
+            Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: Colors.orange.withValues(alpha: 0.5),
+                  width: 1.5,
+                ),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Icon(
+                Icons.add,
+                size: 16,
+                color: Colors.orange.withValues(alpha: 0.7),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              '메모 추가',
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.orange.withValues(alpha: 0.7),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  void _startAddingMemo() {
+    setState(() => _isAddingMemo = true);
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (mounted) _newMemoFocus.requestFocus();
+    });
+  }
+  
+  void _cancelAddingMemo() {
+    setState(() {
+      _isAddingMemo = false;
+      _isSubmittingMemo = false;
+      _newMemoController.clear();
+    });
+  }
+  
+  Future<void> _submitNewMemo(AppProvider provider, String text) async {
+    final trimmedText = text.trim();
+    if (trimmedText.isEmpty) {
+      _cancelAddingMemo();
+      return;
+    }
+    
+    if (_isSubmittingMemo) return;
+    setState(() => _isSubmittingMemo = true);
+    
+    try {
+      await provider.createMemo(text: trimmedText);
+      
+      if (mounted) {
+        _newMemoController.clear();
+        setState(() => _isSubmittingMemo = false);
+        
+        Future.delayed(const Duration(milliseconds: 50), () {
+          if (mounted && _isAddingMemo) _newMemoFocus.requestFocus();
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isSubmittingMemo = false);
+      }
+    }
   }
 }

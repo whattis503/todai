@@ -5,7 +5,7 @@ class TodoModel {
   final String text;
   final bool completed;
   final DateTime createdAt;
-  final DateTime date;
+  final DateTime? date; // null이면 메모 (날짜 없는 할일)
   final int? estimatedTime; // minutes
   final int? actualTime; // minutes
   final String? parentId;
@@ -19,7 +19,7 @@ class TodoModel {
     required this.text,
     this.completed = false,
     required this.createdAt,
-    required this.date,
+    this.date, // nullable로 변경
     this.estimatedTime,
     this.actualTime,
     this.parentId,
@@ -28,6 +28,9 @@ class TodoModel {
     this.timerStartedAt,
     this.timerPausedDuration = 0,
   });
+  
+  // 메모인지 확인 (날짜가 없으면 메모)
+  bool get isMemo => date == null;
 
   factory TodoModel.fromFirestore(Map<String, dynamic> data, String id) {
     return TodoModel(
@@ -35,7 +38,7 @@ class TodoModel {
       text: data['text'] as String? ?? '',
       completed: data['completed'] as bool? ?? false,
       createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      date: (data['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      date: (data['date'] as Timestamp?)?.toDate(), // nullable - null이면 메모
       estimatedTime: data['estimatedTime'] as int?,
       actualTime: data['actualTime'] as int?,
       parentId: data['parentId'] as String?,
@@ -51,7 +54,7 @@ class TodoModel {
       'text': text,
       'completed': completed,
       'createdAt': Timestamp.fromDate(createdAt),
-      'date': Timestamp.fromDate(date),
+      'date': date != null ? Timestamp.fromDate(date!) : null, // nullable 처리
       'estimatedTime': estimatedTime,
       'actualTime': actualTime,
       'parentId': parentId,
