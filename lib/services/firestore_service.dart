@@ -71,8 +71,10 @@ class FirestoreService {
           // Filter by date in memory (exclude memos - items without date)
           final todosForDate = allTodos.where((todo) {
             if (todo.date == null) return false; // 메모는 제외
-            final todoDate = DateTime(todo.date!.year, todo.date!.month, todo.date!.day);
-            return todoDate.isAtSameMomentAs(startOfDay);
+            // 년/월/일만 비교 (시간대 무관)
+            return todo.date!.year == startOfDay.year &&
+                   todo.date!.month == startOfDay.month &&
+                   todo.date!.day == startOfDay.day;
           }).toList();
           
           if (kDebugMode) {
@@ -385,8 +387,10 @@ class FirestoreService {
           .map((doc) => TodoModel.fromFirestore(doc.data(), doc.id))
           .where((todo) {
             if (todo.date == null) return false; // 메모 제외
-            final todoDate = DateTime(todo.date!.year, todo.date!.month, todo.date!.day);
-            return todoDate.isAtSameMomentAs(startOfDay);
+            // 년/월/일만 비교 (시간대 무관)
+            return todo.date!.year == startOfDay.year &&
+                   todo.date!.month == startOfDay.month &&
+                   todo.date!.day == startOfDay.day;
           })
           .map((todo) => todo.text)
           .toSet();
