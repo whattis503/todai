@@ -299,8 +299,20 @@ class AppProvider extends ChangeNotifier {
       debugPrint('AppProvider: Assigning date $date to memo "${memo.text}"');
     }
     
-    final updatedTodo = memo.copyWith(date: date);
-    await _firestoreService.updateTodo(updatedTodo);
+    try {
+      final todoDate = DateTime(date.year, date.month, date.day);
+      final updatedTodo = memo.copyWith(date: todoDate);
+      await _firestoreService.updateTodo(updatedTodo);
+      
+      if (kDebugMode) {
+        debugPrint('AppProvider: Successfully assigned date to memo');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('AppProvider: Error assigning date to memo: $e');
+      }
+      rethrow;
+    }
   }
 
   Future<void> createTodo({

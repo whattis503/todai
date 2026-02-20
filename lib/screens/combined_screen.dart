@@ -2155,16 +2155,28 @@ class _CombinedScreenState extends State<CombinedScreen> {
     );
     
     if (pickedDate != null && mounted) {
-      await provider.assignDateToMemo(memo, pickedDate);
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('메모가 ${pickedDate.month}/${pickedDate.day} 할 일로 이동되었습니다'),
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 2),
-          ),
-        );
+      try {
+        await provider.assignDateToMemo(memo, pickedDate);
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('메모가 ${pickedDate.month}/${pickedDate.day} 할 일로 이동되었습니다'),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('날짜 할당 실패: $e'),
+              backgroundColor: AppTheme.error,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
       }
     }
   }
